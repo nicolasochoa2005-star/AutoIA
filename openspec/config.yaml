@@ -1,0 +1,49 @@
+schema: spec-driven
+
+context: |
+  Producto: AutoTube Engine & Control Center (YouTube Shorts).
+  Código: AutoIA/autotube-engine (NestJS + TypeScript). Narrativa de producto: FuncionalDoc.md.
+  Fuente de verdad de comportamiento: openspec/specs/. Trabajo pendiente: openspec/changes/.
+  Si FuncionalDoc.md y una spec vigente discrepan, gana la spec.
+
+  Stack vigente: NestJS, BullMQ, Redis, Gemini Flash, Groq (fallback de guion), Edge-TTS, Pexels, FFmpeg local.
+  Stack previsto: PostgreSQL + pgvector, Next.js (Estudio con React Flow, Dashboard de KPIs/QA).
+  Costo: proveedores $0 por defecto. APIs pagas solo opt-in por nodo, con estimación, tope y fallback.
+  El sistema NO publica a YouTube hasta que exista un change archivado de publicación + QA humano.
+
+  Roles (dueño de cada change — un change, un rol):
+  - Producto: aprueba proposals, hace QA de videos, opera el Estudio cuando exista.
+  - Engine: pipeline CLI/worker, providers, cola, FFmpeg, persistencia de artefactos.
+  - Studio: canvas de nodos (Next.js + React Flow). No es n8n/ComfyUI genérico.
+  - Dashboard: cola, estados, QA final, KPIs, cuota YouTube, gasto por proveedor.
+  - Agente: implementa SOLO el change asignado; no escribe código sin change activo; no mezcla roles en un mismo PR.
+
+  Convención: un change = una intención en una frase. No juntar Estudio + Dashboard + YouTube.
+
+rules:
+  proposal:
+    - Declare the owning role (Producto, Engine, Studio, or Dashboard) in a "Rol dueño" section.
+    - Declare blocked-by / blocks other OpenSpec changes.
+    - Include Non-goals.
+    - Keep one intent; split if the scope needs "and also".
+  specs:
+    - Use GIVEN / WHEN / THEN scenarios.
+    - Specs describe observable behavior, not NestJS class names or table schemas (those go in design.md).
+    - Default providers remain $0 unless the change explicitly adds a paid adapter.
+  design:
+    - Fit the existing NestJS pipeline contracts (script JSON, SynthesizedAudio, VisualClip, RenderedVideo).
+    - Do not introduce a second backend language or a generic workflow engine.
+  tasks:
+    - Group tasks by the owning role.
+    - Mark anything that touches another role as a dependency, not as work in this change.
+
+operations:
+  apply:
+    guidance:
+      - Implement only the assigned OpenSpec change. Leave other active changes untouched.
+      - Do not publish to YouTube, add paid APIs, or build the node canvas unless that is the change.
+      - Keep FuncionalDoc.md in sync only when behavior in openspec/specs/ changed.
+  archive:
+    guidance:
+      - Confirm the owning role reviewed the behavior, not just that tasks were checked.
+      - Update openspec/ROADMAP.md status for the archived change.

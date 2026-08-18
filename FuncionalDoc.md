@@ -6,6 +6,8 @@ Sistema Autónomo de Generación de Contenido e Integración con YouTube API & D
 **Perfil Objetivo:** Full-Stack Engineer / Single Developer
 **Arquitectura:** Hybrid Low-Cost / Scalable Event-Driven Workers + Node-Based Studio
 
+> **Fuente de verdad operativa:** el comportamiento vigente está en `openspec/specs/`. El roadmap y los roles dueños están en `openspec/ROADMAP.md` y `openspec/changes/`. Este documento es contexto de producto. Si hay conflicto con una spec OpenSpec, gana OpenSpec.
+
 ---
 
 ## 1. Resumen Ejecutivo del Sistema
@@ -448,6 +450,14 @@ Lo que sí se puede asumir como estable:
 ---
 
 ## 9. Hoja de Ruta de Implementación (Roadmap)
+
+La hoja de ruta **ejecutable** (qué está hecho, qué change sigue, qué rol lo implementa) vive en OpenSpec:
+
+- Índice: `openspec/ROADMAP.md`
+- Specs vigentes: `openspec/specs/`
+- Changes activos: `openspec/changes/`
+
+Abajo se conserva el mapa de fases como contexto. No abrir un PR que cruce dos changes; usar `/opsx-propose` / `/opsx-apply` / `/opsx-archive`.
 
 ### Fase 0 — Definiciones previas (antes de escribir código)
 

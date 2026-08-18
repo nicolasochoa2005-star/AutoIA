@@ -1,0 +1,14 @@
+---
+description: OpenSpec is the source of truth for behavior, roles, and roadmap. Use it before coding.
+alwaysApply: true
+---
+
+# OpenSpec
+
+- Comportamiento vigente: `openspec/specs/`.
+- Trabajo pendiente: `openspec/changes/` (índice en `openspec/ROADMAP.md`).
+- Narrativa de producto: `FuncionalDoc.md`. Si hay conflicto, gana OpenSpec.
+- No implementes features nuevas sin un change activo. Un change = un rol dueño (Engine, Studio, Dashboard, Producto).
+- Flujo: `/opsx-propose` (plan) → revisión humana → `/opsx-apply` (código) → `/opsx-archive`.
+- No mezcles Estudio, Dashboard y YouTube en el mismo PR.
+- CLI: `npx @fission-ai/openspec` desde `AutoIA/` (`list`, `validate --all`, `show <change>`).
