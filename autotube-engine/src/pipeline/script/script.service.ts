@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GeneratedScript } from '../types/script.types';
 import { withRetry } from '../../common/retry';
+import { ScriptProvider } from './providers/script-provider.interface';
+import { GeminiProvider } from './providers/gemini.provider';
+import { GroqProvider } from './providers/groq.provider';
 
 const SYSTEM_PROMPT = `Sos un guionista de YouTube Shorts. Generá una pieza de contenido corta (25-40s de locución) en formato JSON estricto, sin texto adicional fuera del JSON, con esta forma exacta:
 {
@@ -16,11 +18,18 @@ const SYSTEM_PROMPT = `Sos un guionista de YouTube Shorts. Generá una pieza de 
 @Injectable()
 export class ScriptService {
   private readonly logger = new Logger(ScriptService.name);
-  private readonly client: GoogleGenerativeAI;
+  private readonly providers: ScriptProvider[];
 
-  constructor(private readonly config: ConfigService) {
-    const apiKey = this.config.getOrThrow<string>('GEMINI_API_KEY');
-    this.client = new GoogleGenerativeAI(apiKey);
+  constructor(
+    private readonly gemini: GeminiProvider,
+    private readonly groq: GroqProvider,
+    private readonly config: ConfigService,
+  ) {
+    const groqConfigured = Boolean(this.config.get<string>('GROQ_API_KEY'));
+    this.providers = [this.gemini, ...(groqConfigured ? [this.groq] : [])];
+    if (!groqConfigured) {
+      this.logger.log('GROQ_API_KEY no configurada: sin fallback de guion, solo Gemini.');
+    }
   }
 
   async generate(
@@ -28,37 +37,36 @@ export class ScriptService {
     recentTitles: string[],
     extraInstruction?: string,
   ): Promise<GeneratedScript> {
-    const model = this.client.getGenerativeModel({
-      model: 'gemini-3.6-flash',
-      generationConfig: { responseMimeType: 'application/json' },
-    });
-
     const historyBlock = recentTitles.length
       ? `Temas ya publicados recientemente (NO repetir tema ni estructura de apertura): ${recentTitles.join(', ')}`
       : 'No hay videos previos publicados todavía.';
 
     const extraBlock = extraInstruction ? `\n${extraInstruction}` : '';
-
     const prompt = `${SYSTEM_PROMPT}\n\nTema sugerido: ${topicHint}\n${historyBlock}${extraBlock}`;
 
-    const raw = await withRetry(
-      async () => {
-        const result = await model.generateContent(prompt);
-        return result.response.text();
-      },
-      {
-        maxAttempts: 3,
-        baseDelayMs: 2000,
-        isRetryable: this.isTransientError,
-      },
-    );
+    let lastError: unknown;
+    for (const [index, provider] of this.providers.entries()) {
+      try {
+        const raw = await withRetry(() => provider.generateRaw(prompt), {
+          maxAttempts: 3,
+          baseDelayMs: 2000,
+          isRetryable: (err) => provider.isTransientError(err),
+        });
+        return this.parseAndValidate(raw);
+      } catch (err) {
+        lastError = err;
+        const hasNextProvider = index < this.providers.length - 1;
+        if (hasNextProvider) {
+          this.logger.warn(
+            `Proveedor de guion "${provider.name}" agotó reintentos, cayendo a fallback: ${(err as Error).message}`,
+          );
+        }
+      }
+    }
 
-    return this.parseAndValidate(raw);
-  }
-
-  private isTransientError(error: unknown): boolean {
-    const message = error instanceof Error ? error.message : String(error);
-    return /\[(429|500|503)/.test(message) || /timeout/i.test(message);
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('INVALID_SCRIPT: todos los proveedores de guion fallaron');
   }
 
   private parseAndValidate(raw: string): GeneratedScript {

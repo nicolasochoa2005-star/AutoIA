@@ -41,6 +41,33 @@ export class RenderService {
     const outputPath = path.join(outputDir, 'final.mp4');
     const escapedAssPath = this.escapeFfmpegFilterPath(audio.subtitlesAssPath);
 
+    try {
+      await this.runComposite(concatenatedPath, audio, escapedAssPath, outputPath, backgroundMusicPath);
+    } catch (err) {
+      if (!backgroundMusicPath) {
+        throw err;
+      }
+      this.logger.warn(
+        `Fallo el render con música de fondo, reintentando sin BGM: ${(err as Error).message}`,
+      );
+      await this.runComposite(concatenatedPath, audio, escapedAssPath, outputPath, undefined);
+    }
+
+    const stat = await fs.stat(outputPath).catch(() => null);
+    if (!stat || stat.size === 0) {
+      throw new Error('RENDER_FAILED: el archivo de salida no se generó o está vacío');
+    }
+
+    return { videoPath: outputPath, durationMs: audio.durationMs };
+  }
+
+  private async runComposite(
+    concatenatedPath: string,
+    audio: SynthesizedAudio,
+    escapedAssPath: string,
+    outputPath: string,
+    backgroundMusicPath: string | undefined,
+  ): Promise<void> {
     const audioFilterArgs = backgroundMusicPath
       ? this.buildDuckingFilter()
       : ['-map', '1:a'];
@@ -60,13 +87,6 @@ export class RenderService {
       '-shortest',
       outputPath,
     ]);
-
-    const stat = await fs.stat(outputPath).catch(() => null);
-    if (!stat || stat.size === 0) {
-      throw new Error('RENDER_FAILED: el archivo de salida no se generó o está vacío');
-    }
-
-    return { videoPath: outputPath, durationMs: audio.durationMs };
   }
 
   /**
