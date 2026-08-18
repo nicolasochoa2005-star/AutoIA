@@ -40,7 +40,9 @@ El objetivo del proyecto es construir una plataforma web end-to-end compuesta po
 
 ### 3.1 Módulo 1: Investigación y Generación de Guion (LLM)
 
-El sistema solicita al modelo (Gemini Flash, vía el alias `gemini-flash-latest` para no depender de una versión fija / OpenAI GPT-4o-mini) la generación de una pieza estructurada en formato estricto JSON. Se le provee un historial de los últimos temas publicados para prevenir duplicidad.
+El sistema solicita al modelo (Gemini Flash, vía el alias `gemini-flash-latest` para no depender de una versión fija) la generación de una pieza estructurada en formato estricto JSON. Se le provee un historial de los últimos temas publicados para prevenir duplicidad.
+
+**Fallback de proveedor (implementado en Fase 2):** el guion se genera detrás de una interfaz `ScriptProvider` con múltiples implementaciones intercambiables. Si Gemini agota sus reintentos por un error transitorio (rate limit, timeout, 5xx — ver política 3.8), el sistema cae automáticamente a Groq (modelo `llama-3.3-70b-versatile`, también con capa gratuita) antes de marcar el video en `ERROR`. El fallback es opcional: si no hay `GROQ_API_KEY` configurada, el sistema opera solo con Gemini como antes. Este diseño deja la puerta abierta a sumar OpenAI GPT-4o-mini u otros proveedores como una implementación más de la misma interfaz, sin tocar el resto del pipeline.
 
 ```json
 {
@@ -75,6 +77,8 @@ Un script automatizado toma la voz sintetizada, el archivo `.ass` de subtítulos
 - Ajuste de relación de aspecto vertical 9:16 (1080 x 1920 px) a 60 FPS.
 - Superposición y centrado visual de los subtítulos generados.
 - Normalización y ajuste del volumen del audio de locución con música de fondo atenuada (*ducking*).
+
+**Fallback de música de fondo (implementado en Fase 2):** si el render con `backgroundMusicPath` (ducking vía `sidechaincompress`) falla, el sistema reintenta automáticamente el mismo render sin música de fondo antes de marcar el video como `RENDER_FAILED`. Esto evita que un problema puntual con la pista de audio (formato inválido, pista corrupta, filtro incompatible) tire abajo un video que por lo demás está listo — se prioriza entregar el video con locución y subtítulos sobre no entregar nada.
 
 ### 3.5 Módulo 5: Filtro Automático Anti-Repetición (Pre-QA)
 
@@ -136,7 +140,7 @@ Aplica a todas las etapas del pipeline (3.1 a 3.7). Objetivo: evitar tanto reint
 
 | Módulo | Opción Base ($0 / Low-Cost) | Opción Escalada / GenAI | Costo Est. por Video (30s) |
 |---|---|---|---|
-| Guion & Prompts | Gemini Flash (Free Tier) | OpenAI GPT-4o-mini | $0.0000 - $0.0020 USD |
+| Guion & Prompts | Gemini Flash (Free Tier), fallback a Groq (Free Tier) | OpenAI GPT-4o-mini | $0.0000 - $0.0020 USD |
 | Locución (TTS) | Edge-TTS (Open Source) | ElevenLabs API | $0.0000 - $0.0150 USD |
 | Recursos Visuales | Pexels API (Gratis) | Higgsfield AI API / Fal.ai | $0.0000 - $0.1500 USD |
 | Renderizado | FFmpeg local / VPS | Creatomate / Shotstack API | $0.0000 - $0.0500 USD |
@@ -286,6 +290,7 @@ Script local en Python/Node que ejecute el pipeline completo de 1 video (LLM →
 - CRON 1 (generación diaria) implementado con `@nestjs/schedule`, configurable vía `DAILY_CRON_SCHEDULE`.
 - Sin reintento automático a nivel de job en BullMQ (`attempts: 1`): los reintentos transitorios ya se manejan dentro de cada etapa (política 3.8); reintentar el pipeline completo violaría la regla de idempotencia (no repetir trabajo ya hecho de etapas previas).
 - Histórico de guiones (`data/script-history.json`) y logs de jobs (`data/job-logs.json`) implementados como stores basados en archivo local — interinos hasta que Fase 3 los reemplace por PostgreSQL (`videos.embedding` con pgvector y `video_logs`) sin tocar la lógica del filtro ni del processor.
+- Extra (resiliencia agregada tras la implementación inicial): fallback de proveedor de guion Gemini → Groq (ver sección 3.1) y fallback de render sin música de fondo si el ducking falla (ver sección 3.4).
 
 ### Fase 3 — Dashboard Base, DB y QA Manual
 
