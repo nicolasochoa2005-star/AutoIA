@@ -21,3 +21,8 @@ pnpm-debug.log*
 # pipeline working files
 output/
 data/
+
+# librería local: se trackean characters/*.json, los binarios (fotos/PNGs) no
+assets/library/subjects/
+assets/library/outfits/
+assets/library/scenes/

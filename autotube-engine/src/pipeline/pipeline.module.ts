@@ -11,6 +11,10 @@ import { EmbeddingService } from './similarity/embedding.service';
 import { AntiRepetitionService } from './similarity/anti-repetition.service';
 import { FileScriptHistoryStore } from './similarity/file-history-store';
 import { HISTORY_STORE } from './similarity/history-store.token';
+import { ManifestService } from './manifest/manifest.service';
+import { StageGateService } from './manifest/stage-gate.service';
+import { LibraryService } from './library/library.service';
+import { ComposeService } from './compose/compose.service';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true })],
@@ -24,6 +28,10 @@ import { HISTORY_STORE } from './similarity/history-store.token';
     PipelineService,
     EmbeddingService,
     AntiRepetitionService,
+    ManifestService,
+    StageGateService,
+    LibraryService,
+    ComposeService,
     { provide: HISTORY_STORE, useClass: FileScriptHistoryStore },
   ],
   exports: [PipelineService],

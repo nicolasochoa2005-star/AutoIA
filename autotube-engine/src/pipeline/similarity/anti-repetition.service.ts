@@ -6,6 +6,7 @@ import { cosineSimilarity } from './cosine-similarity';
 import { GeneratedScript } from '../types/script.types';
 import { HISTORY_STORE } from './history-store.token';
 import type { ScriptHistoryStore } from './history-store.token';
+import type { CharacterBible } from '../library/library.types';
 
 const DEFAULT_MAX_REGENERATIONS = 3;
 const DEFAULT_SIMILARITY_THRESHOLD = 0.85;
@@ -40,7 +41,10 @@ export class AntiRepetitionService {
     @Inject(HISTORY_STORE) private readonly historyStore: ScriptHistoryStore,
   ) {}
 
-  async generateNonRepetitive(topicHint: string): Promise<AntiRepetitionResult> {
+  async generateNonRepetitive(
+    topicHint: string,
+    character?: CharacterBible,
+  ): Promise<AntiRepetitionResult> {
     const maxAttempts = this.config.get<number>(
       'ANTI_REPETITION_MAX_ATTEMPTS',
       DEFAULT_MAX_REGENERATIONS,
@@ -61,7 +65,12 @@ export class AntiRepetitionService {
     let extraInstruction: string | undefined;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const script = await this.scriptService.generate(topicHint, recentTitles, extraInstruction);
+      const script = await this.scriptService.generate(
+        topicHint,
+        recentTitles,
+        extraInstruction,
+        character,
+      );
       const embedding = await this.embeddingService.embed(script.guion_locucion);
 
       const maxSimilarity = this.maxSimilarityAgainst(embedding, history);
@@ -83,6 +92,11 @@ export class AntiRepetitionService {
     throw new Error(
       `REPETITIVE_CONTENT: no se logró un guion suficientemente distinto del histórico tras ${maxAttempts} intentos`,
     );
+  }
+
+  /** Recalcula el embedding de un guion ya persistido (resume/override/pause). */
+  async embedForResume(script: GeneratedScript): Promise<number[]> {
+    return this.embeddingService.embed(script.guion_locucion);
   }
 
   async recordPublished(script: GeneratedScript, embedding: number[]): Promise<void> {

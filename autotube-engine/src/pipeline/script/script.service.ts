@@ -5,6 +5,7 @@ import { withRetry } from '../../common/retry';
 import { ScriptProvider } from './providers/script-provider.interface';
 import { GeminiProvider } from './providers/gemini.provider';
 import { GroqProvider } from './providers/groq.provider';
+import { CharacterBible } from '../library/library.types';
 
 const SYSTEM_PROMPT = `Sos un guionista de YouTube Shorts. Generá una pieza de contenido corta (25-40s de locución) en formato JSON estricto, sin texto adicional fuera del JSON, con esta forma exacta:
 {
@@ -14,6 +15,13 @@ const SYSTEM_PROMPT = `Sos un guionista de YouTube Shorts. Generá una pieza de 
   "guion_locucion": string (texto de locución en español, natural, sin marcas de tiempo),
   "prompts_visuales": string[] (3-5 prompts en inglés para buscar stock footage)
 }`;
+
+const CHARACTER_SCHEMA_ADDENDUM = `Si se te provee un personaje (identidad fija), agregá también "beats_visuales": array de objetos { "prompt": string, "subject_id": string, "outfit_id": string, "source_hint": "character" } — uno por plano donde aparece el personaje. No cambies de sujeto entre beats: todos deben usar el mismo subject_id salvo indicación contraria.`;
+
+function buildCharacterBlock(character: CharacterBible): string {
+  const outfits = character.outfits.map((o) => `${o.id} (${o.description})`).join(', ') || 'ninguno definido';
+  return `Personaje fijado para esta corrida — subject_id "${character.subjectId}": ${character.name}. ${character.description}\nOutfits disponibles: ${outfits}.\nNO cambies la identidad del sujeto entre beats. ${CHARACTER_SCHEMA_ADDENDUM}`;
+}
 
 @Injectable()
 export class ScriptService {
@@ -36,13 +44,15 @@ export class ScriptService {
     topicHint: string,
     recentTitles: string[],
     extraInstruction?: string,
+    character?: CharacterBible,
   ): Promise<GeneratedScript> {
     const historyBlock = recentTitles.length
       ? `Temas ya publicados recientemente (NO repetir tema ni estructura de apertura): ${recentTitles.join(', ')}`
       : 'No hay videos previos publicados todavía.';
 
     const extraBlock = extraInstruction ? `\n${extraInstruction}` : '';
-    const prompt = `${SYSTEM_PROMPT}\n\nTema sugerido: ${topicHint}\n${historyBlock}${extraBlock}`;
+    const characterBlock = character ? `\n${buildCharacterBlock(character)}` : '';
+    const prompt = `${SYSTEM_PROMPT}\n\nTema sugerido: ${topicHint}\n${historyBlock}${extraBlock}${characterBlock}`;
 
     let lastError: unknown;
     for (const [index, provider] of this.providers.entries()) {

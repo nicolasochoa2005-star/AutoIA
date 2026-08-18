@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { spawn } from 'child_process';
 import { EdgeTTS } from 'edge-tts-universal';
 import { SynthesizedAudio, WordTimestamp } from '../types/script.types';
 import { buildAssSubtitles } from './ass-builder';
@@ -43,5 +44,35 @@ export class TtsService {
     const durationMs = words[words.length - 1]?.endMs ?? 0;
 
     return { audioPath, subtitlesAssPath, words, durationMs };
+  }
+
+  /** Reanuda una etapa TTS ya completada (manifest `done` o gate `pause`/`override`). */
+  async loadExisting(audioDir: string): Promise<SynthesizedAudio> {
+    const audioPath = path.join(audioDir, 'voice.mp3');
+    const subtitlesAssPath = path.join(audioDir, 'subtitles.ass');
+    const durationMs = await this.probeDurationMs(audioPath);
+    return { audioPath, subtitlesAssPath, words: [], durationMs };
+  }
+
+  private probeDurationMs(audioPath: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn('ffprobe', [
+        '-v', 'quiet',
+        '-show_entries', 'format=duration',
+        '-of', 'csv=p=0',
+        audioPath,
+      ]);
+      let stdout = '';
+      proc.stdout.on('data', (chunk) => (stdout += chunk.toString()));
+      proc.on('error', (err) => reject(new Error(`TTS_TIMEOUT: ${err.message}`)));
+      proc.on('close', (code) => {
+        const seconds = parseFloat(stdout.trim());
+        if (code === 0 && !Number.isNaN(seconds)) {
+          resolve(Math.round(seconds * 1000));
+        } else {
+          reject(new Error('TTS_TIMEOUT: no se pudo determinar la duración del audio existente'));
+        }
+      });
+    });
   }
 }

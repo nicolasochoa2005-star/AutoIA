@@ -1,9 +1,18 @@
+export interface VisualBeat {
+  prompt: string;
+  subject_id?: string;
+  outfit_id?: string;
+  source_hint?: 'character' | 'stock';
+}
+
 export interface GeneratedScript {
   titulo: string;
   descripcion: string;
   etiquetas: string[];
   guion_locucion: string;
   prompts_visuales: string[];
+  /** Opcional: presente cuando la corrida tiene un character bible conectado (sección 3.3.2). */
+  beats_visuales?: VisualBeat[];
 }
 
 export interface WordTimestamp {
@@ -20,7 +29,9 @@ export interface SynthesizedAudio {
 }
 
 export interface VisualClip {
-  source: 'pexels' | 'pixabay';
+  source: 'pexels' | 'pixabay' | 'local';
+  /** 'still' requiere conversión Ken Burns antes de concatenar (ver render.service). */
+  kind: 'video' | 'still';
   sourceAssetId: string;
   licenseType: string;
   licenseUrl?: string;

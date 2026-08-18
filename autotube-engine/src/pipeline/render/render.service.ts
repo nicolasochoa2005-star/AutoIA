@@ -7,6 +7,7 @@ import { RenderedVideo, SynthesizedAudio, VisualClip } from '../types/script.typ
 const TARGET_WIDTH = 1080;
 const TARGET_HEIGHT = 1920;
 const TARGET_FPS = 60;
+const KEN_BURNS_MIN_DURATION_SEC = 2;
 
 @Injectable()
 export class RenderService {
@@ -24,7 +25,7 @@ export class RenderService {
     const normalizedClipsDir = path.join(outputDir, 'normalized_clips');
     await fs.mkdir(normalizedClipsDir, { recursive: true });
 
-    const normalizedPaths = await this.normalizeClips(clips, normalizedClipsDir);
+    const normalizedPaths = await this.normalizeClips(clips, normalizedClipsDir, audio.durationMs);
     await this.writeConcatList(normalizedPaths, concatListPath);
 
     const concatenatedPath = path.join(outputDir, 'background_concat.mp4');
@@ -109,21 +110,57 @@ export class RenderService {
     ];
   }
 
-  private async normalizeClips(clips: VisualClip[], outDir: string): Promise<string[]> {
+  private async normalizeClips(
+    clips: VisualClip[],
+    outDir: string,
+    audioDurationMs: number,
+  ): Promise<string[]> {
+    // Los stills (Ken Burns) no tienen duración natural como un clip de stock;
+    // se reparte la duración del audio entre ellos para que la concatenación
+    // alcance a cubrir la locución completa (si no, `-shortest` recorta el audio).
+    const stillCount = clips.filter((c) => c.kind === 'still').length;
+    const kenBurnsDurationSec =
+      stillCount > 0
+        ? Math.max(KEN_BURNS_MIN_DURATION_SEC, audioDurationMs / 1000 / stillCount)
+        : KEN_BURNS_MIN_DURATION_SEC;
+
     const normalized: string[] = [];
     for (const [index, clip] of clips.entries()) {
       const outPath = path.join(outDir, `n_${index}.mp4`);
-      await this.runFfmpeg([
-        '-y',
-        '-i', clip.localPath,
-        '-vf', `scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=increase,crop=${TARGET_WIDTH}:${TARGET_HEIGHT},fps=${TARGET_FPS}`,
-        '-an',
-        '-c:v', 'libx264',
-        outPath,
-      ]);
+      if (clip.kind === 'still') {
+        await this.kenBurnsClip(clip.localPath, outPath, kenBurnsDurationSec);
+      } else {
+        await this.runFfmpeg([
+          '-y',
+          '-i', clip.localPath,
+          '-vf', `scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=increase,crop=${TARGET_WIDTH}:${TARGET_HEIGHT},fps=${TARGET_FPS}`,
+          '-an',
+          '-c:v', 'libx264',
+          outPath,
+        ]);
+      }
       normalized.push(outPath);
     }
     return normalized;
+  }
+
+  /** Convierte un still en un clip 9:16 con zoom/pan lento (sección 3.4). */
+  private async kenBurnsClip(stillPath: string, outPath: string, durationSec: number): Promise<void> {
+    const oversizeWidth = TARGET_WIDTH * 2;
+    const oversizeHeight = TARGET_HEIGHT * 2;
+    const totalFrames = Math.round(durationSec * TARGET_FPS);
+
+    await this.runFfmpeg([
+      '-y',
+      '-loop', '1',
+      '-i', stillPath,
+      '-t', String(durationSec),
+      '-vf',
+      `scale=${oversizeWidth}:${oversizeHeight}:force_original_aspect_ratio=increase,crop=${oversizeWidth}:${oversizeHeight},zoompan=z='min(zoom+0.0015,1.2)':d=${totalFrames}:s=${TARGET_WIDTH}x${TARGET_HEIGHT}:fps=${TARGET_FPS}`,
+      '-pix_fmt', 'yuv420p',
+      '-c:v', 'libx264',
+      outPath,
+    ]);
   }
 
   private async writeConcatList(clipPaths: string[], listPath: string): Promise<void> {
