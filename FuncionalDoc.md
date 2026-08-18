@@ -109,6 +109,27 @@ Antes de la publicación, todo video generado pasa por un estado `READY_FOR_REVI
 
 Una vez aprobado en QA, el worker ejecuta una solicitud POST autenticada vía OAuth 2.0 / Refresh Token hacia la API de YouTube enviando la metadata, portada y archivo `.mp4` renderizado. La publicación se establece por defecto como `PUBLIC`.
 
+### 3.8 Política de Errores y Reintentos
+
+Aplica a todas las etapas del pipeline (3.1 a 3.7). Objetivo: evitar tanto reintentos infinitos como fallos silenciosos que dejen un video a medias sin que quede registrado.
+
+**Clasificación de errores por etapa:**
+
+| Etapa | Errores transitorios (reintentables) | Errores no transitorios (van a `ERROR`) |
+|---|---|---|
+| Guion (LLM) | Timeout, rate limit (429) | JSON inválido tras reintentos, contenido bloqueado por filtro de seguridad |
+| TTS | Timeout, rate limit | Guion vacío o corrupto |
+| Visuales (Pexels/Pixabay) | Timeout, rate limit | Sin resultados relevantes para las keywords del guion |
+| Render (FFmpeg) | — (los fallos de FFmpeg se tratan como no transitorios por defecto) | Falla de proceso, archivo de salida corrupto o inexistente |
+| Publicación (YouTube API) | Timeout, `403 quotaExceeded` (reintentar en el próximo reset) | Error de autenticación, metadata rechazada por políticas |
+
+**Reglas:**
+
+1. **Reintentos automáticos:** solo para errores transitorios, máximo 3 intentos con backoff exponencial (ej. 30s, 2min, 8min). Se agota el máximo → pasa a regla 2.
+2. **Errores no transitorios (o transitorios agotados):** el video pasa a estado `ERROR` con un motivo específico en `error_reason` (ej. `INVALID_SCRIPT`, `NO_VISUAL_MATCH`, `RENDER_FAILED`, `TTS_TIMEOUT`, `QUOTA_EXCEEDED`, `REPETITIVE_CONTENT` de la sección 3.5). Nunca se reintenta indefinidamente ni se publica un video incompleto.
+3. **Logging:** cada intento (exitoso o fallido) se registra en la tabla `video_logs` (ver sección 6) con etapa, timestamp, y detalle del error si aplica. El Dashboard filtra por estado `ERROR` como panel de revisión — no hay alertas push en esta fase, el operador humano revisa manualmente (proyecto de un solo desarrollador).
+4. **Idempotencia:** un reintento de una etapa no debe duplicar trabajo ya hecho de etapas previas (ej. si falla el render, no se regenera el guion ni el audio si ya existen y son válidos).
+
 ---
 
 ## 4. Matriz de Costos y Estrategia de Sustentabilidad
@@ -167,6 +188,7 @@ CREATE TABLE videos (
     script TEXT NOT NULL,
     tags TEXT[],
     status VARCHAR(30) NOT NULL DEFAULT 'QUEUED',
+    error_reason VARCHAR(50),             -- motivo cuando status = 'ERROR' (ver 3.8), ej. 'RENDER_FAILED'
     video_url TEXT,
     embedding VECTOR(384),                -- requiere extensión pgvector; embedding del guion para filtro anti-repetición (ver 3.5)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -174,6 +196,17 @@ CREATE TABLE videos (
     reviewed_by VARCHAR(100),
     reviewed_at TIMESTAMP WITH TIME ZONE,
     review_notes TEXT
+);
+
+-- Tabla de Logs por intento de etapa (ver política de errores/reintentos, sección 3.8)
+CREATE TABLE video_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    video_id UUID REFERENCES videos(id) ON DELETE CASCADE,
+    stage VARCHAR(30) NOT NULL,           -- 'SCRIPT' | 'TTS' | 'VISUALS' | 'RENDER' | 'PUBLISH'
+    attempt INT NOT NULL DEFAULT 1,
+    success BOOLEAN NOT NULL,
+    error_detail TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Tabla de Assets utilizados por video (trazabilidad de licencias)
@@ -221,7 +254,7 @@ Lo que sí se puede asumir como estable:
 - **Política de contenido inauténtico/masivo de YouTube:** el sistema debe evitar patrones de publicación que se perciban como spam o contenido reciclado en masa. Mitigado mediante el filtro automático anti-repetición (sección 3.5) y el checklist de QA manual (sección 3.6).
 - **Monetización (YouTube Partner Program):** validar los requisitos vigentes de umbral de suscriptores/horas de visualización y las políticas específicas sobre contenido generado o reutilizado en masa, que pueden excluir un canal de la monetización aunque esté activo y publicando.
 - **Derechos de autor de assets:** ver sección 3.3.1.
-- **Manejo de errores y reintentos:** *pendiente de definir* — estrategia del pipeline ante fallos parciales (ej. Pexels sin resultados relevantes, falla de FFmpeg a mitad de render, timeout de TTS).
+- **Manejo de errores y reintentos:** ver política definida en sección 3.8.
 
 ---
 
