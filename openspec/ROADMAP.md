@@ -6,7 +6,7 @@ Cada fila pendiente es un change en `openspec/changes/`. Un change = un rol due�
 | Estado | Change | Rol dueño | Qué desbloquea |
 |---|---|---|---|
 | Hecho (specs vigentes) | Fase 1 CLI + Fase 2 cola/anti-repetición | Engine | Generar un Short local sin publicar |
-| Activo | `add-stage-gates-and-local-refs` | Engine | Control manual por etapa, refs, compose, Ken Burns |
+| Hecho (specs vigentes) | `add-stage-gates-and-local-refs` | Engine | Control manual por etapa, refs, compose, Ken Burns |
 | Activo | `add-postgres-video-lifecycle` | Engine | Estados persistentes, embeddings, logs con costo |
 | Activo | `add-node-studio` | Studio | Canvas de nodos (React Flow) sobre el contrato de artefactos |
 | Activo | `add-dashboard-qa` | Dashboard | Cola, preview, aprobar/rechazar, `WAITING_FOR_INPUT` |

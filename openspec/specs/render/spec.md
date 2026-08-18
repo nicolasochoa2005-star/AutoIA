@@ -3,9 +3,7 @@
 ## Purpose
 
 Ensamblar un Short vertical 9:16 con locución, subtítulos y clips de fondo, sin publicar.
-
 ## Requirements
-
 ### Requirement: Video vertical 9:16
 The system SHALL render a local MP4 at 1080x1920 with burned-in subtitles and the synthesized narration.
 
@@ -28,3 +26,12 @@ If background-music ducking fails, the system SHALL retry the same render withou
 - WHEN the first render attempt fails
 - THEN a second attempt runs with narration only
 - AND a successful second attempt is treated as a completed render
+
+### Requirement: Stills con Ken Burns
+The system SHALL accept still images as visual inputs and convert them into 1080x1920 clips (Ken Burns zoom/pan) before concatenating with stock video.
+
+#### Scenario: Beat still
+- GIVEN a composed JPEG for a beat and valid audio duration
+- WHEN render runs
+- THEN the still is turned into a vertical clip used in the final MP4
+

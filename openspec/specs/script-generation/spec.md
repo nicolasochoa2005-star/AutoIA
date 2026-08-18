@@ -3,9 +3,7 @@
 ## Purpose
 
 Generar un guion de YouTube Short en JSON estricto a partir de un tema, con proveedores intercambiables y fallback gratuito.
-
 ## Requirements
-
 ### Requirement: Guion JSON estricto
 The system SHALL produce a script object with non-empty `titulo`, `descripcion`, `etiquetas`, `guion_locucion` (Spanish narration), and `prompts_visuales` (one or more English stock-search prompts).
 
@@ -43,3 +41,12 @@ The system SHALL try Gemini first and, if that provider exhausts retries on a tr
 - WHEN Gemini fails
 - THEN the system does not call Groq
 - AND the run fails after Gemini retries
+
+### Requirement: Character bible en el prompt
+When a character bible is attached to the run, the system SHALL include identity, outfit, and a do-not-switch-subject instruction in the script prompt.
+
+#### Scenario: Personaje Ana
+- GIVEN `characters/ana.json` selected for the run
+- WHEN script generation runs
+- THEN the prompt names Ana and forbids changing subject between beats
+
