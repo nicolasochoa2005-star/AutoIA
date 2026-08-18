@@ -21,8 +21,7 @@ async function bootstrap() {
   const workDir = path.join(process.cwd(), 'output', `run_${Date.now()}`);
 
   try {
-    // Fase 1: sin histórico real todavía (se conecta a la DB en Fase 3).
-    const result = await pipeline.run(topicHint, [], workDir);
+    const result = await pipeline.run(topicHint, workDir);
     logger.log(`Pipeline completo. Video listo en: ${result.render.videoPath}`);
     logger.log('Publicación NO ejecutada (pendiente de QA manual + Fase 4).');
   } catch (err) {

@@ -26,6 +26,7 @@ export class ScriptService {
   async generate(
     topicHint: string,
     recentTitles: string[],
+    extraInstruction?: string,
   ): Promise<GeneratedScript> {
     const model = this.client.getGenerativeModel({
       model: 'gemini-3.6-flash',
@@ -36,7 +37,9 @@ export class ScriptService {
       ? `Temas ya publicados recientemente (NO repetir tema ni estructura de apertura): ${recentTitles.join(', ')}`
       : 'No hay videos previos publicados todavía.';
 
-    const prompt = `${SYSTEM_PROMPT}\n\nTema sugerido: ${topicHint}\n${historyBlock}`;
+    const extraBlock = extraInstruction ? `\n${extraInstruction}` : '';
+
+    const prompt = `${SYSTEM_PROMPT}\n\nTema sugerido: ${topicHint}\n${historyBlock}${extraBlock}`;
 
     const raw = await withRetry(
       async () => {

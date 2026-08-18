@@ -279,12 +279,13 @@ Script local en Python/Node que ejecute el pipeline completo de 1 video (LLM →
 - Renderizado final con FFmpeg (sección 3.4).
 - Salida: 1 video `.mp4` + metadata, sin publicar. Éxito = poder generar 5-10 videos manualmente y evaluar calidad a ojo antes de automatizar nada.
 
-### Fase 2 — Filtro Anti-Repetición + Task Queue
+### Fase 2 — Filtro Anti-Repetición + Task Queue ✅ (implementado, validado con Redis real)
 
-- Implementar el filtro automático de similitud semántica (sección 3.5): embeddings locales + comparación contra histórico + lógica de reintento/rechazo.
-- Envolver el pipeline de Fase 1 en tareas de Celery/BullMQ.
-- Aplicar la política de errores/reintentos definida en Fase 0 a cada etapa de la tarea.
-- Activar CRON 1 (generación diaria) sobre el pipeline encolado, sin publicación automática todavía.
+- Filtro automático de similitud semántica (sección 3.5): embeddings locales (`@xenova/transformers`, sin costo de API) + comparación por similitud coseno contra histórico + rechazo/regeneración automática con instrucción explícita al LLM. Incluye la señal complementaria de tipo de hook (pregunta/cifra/dato/exclamación) para evitar repetir el mismo estilo de apertura en videos consecutivos.
+- Pipeline envuelto en BullMQ (Redis) con separación productor/worker: `ProducerModule` (encola jobs, sin procesar) y `WorkerModule` (consume y ejecuta el pipeline) — evita que un script de solo-encolado termine también actuando como worker.
+- CRON 1 (generación diaria) implementado con `@nestjs/schedule`, configurable vía `DAILY_CRON_SCHEDULE`.
+- Sin reintento automático a nivel de job en BullMQ (`attempts: 1`): los reintentos transitorios ya se manejan dentro de cada etapa (política 3.8); reintentar el pipeline completo violaría la regla de idempotencia (no repetir trabajo ya hecho de etapas previas).
+- Histórico de guiones (`data/script-history.json`) y logs de jobs (`data/job-logs.json`) implementados como stores basados en archivo local — interinos hasta que Fase 3 los reemplace por PostgreSQL (`videos.embedding` con pgvector y `video_logs`) sin tocar la lógica del filtro ni del processor.
 
 ### Fase 3 — Dashboard Base, DB y QA Manual
 
