@@ -2,16 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { MsEdgeTTS, OUTPUT_FORMAT } from 'edge-tts-node';
+import { EdgeTTS } from 'edge-tts-universal';
 import { SynthesizedAudio, WordTimestamp } from '../types/script.types';
 import { buildAssSubtitles } from './ass-builder';
-
-interface WordBoundaryMetadata {
-  type: 'WordBoundary';
-  offset: number;
-  duration: number;
-  text: string;
-}
 
 @Injectable()
 export class TtsService {
@@ -26,16 +19,22 @@ export class TtsService {
     const audioPath = path.join(outputDir, 'voice.mp3');
     const subtitlesAssPath = path.join(outputDir, 'subtitles.ass');
 
-    const tts = new MsEdgeTTS({});
-    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+    const tts = new EdgeTTS(text, voice);
+    const { audio, subtitle } = await tts.synthesize();
 
-    const { audioBuffer, words } = await this.collectStream(tts, text);
-    tts.close();
+    const words: WordTimestamp[] = subtitle
+      .filter((w) => w.text.trim().length > 0)
+      .map((w) => ({
+        word: w.text,
+        startMs: Math.round(w.offset / 10000),
+        endMs: Math.round((w.offset + w.duration) / 10000),
+      }));
 
     if (words.length === 0) {
       throw new Error('TTS_TIMEOUT: no se obtuvieron marcas de tiempo por palabra');
     }
 
+    const audioBuffer = Buffer.from(await audio.arrayBuffer());
     await fs.writeFile(audioPath, audioBuffer);
 
     const assContent = buildAssSubtitles(words);
@@ -44,50 +43,5 @@ export class TtsService {
     const durationMs = words[words.length - 1]?.endMs ?? 0;
 
     return { audioPath, subtitlesAssPath, words, durationMs };
-  }
-
-  /**
-   * edge-tts-node pushes metadata (JSON strings) and raw audio (Buffers)
-   * into the same non-object-mode stream; chunks must be disambiguated
-   * by attempting JSON.parse on each one.
-   */
-  private collectStream(
-    tts: MsEdgeTTS,
-    text: string,
-  ): Promise<{ audioBuffer: Buffer; words: WordTimestamp[] }> {
-    return new Promise((resolve, reject) => {
-      const audioChunks: Buffer[] = [];
-      const words: WordTimestamp[] = [];
-
-      const stream = tts.toStream(text);
-
-      stream.on('data', (chunk: Buffer) => {
-        const parsed = this.tryParseMetadata(chunk);
-        if (parsed) {
-          words.push({
-            word: parsed.text,
-            startMs: Math.round(parsed.offset / 10000),
-            endMs: Math.round((parsed.offset + parsed.duration) / 10000),
-          });
-        } else {
-          audioChunks.push(chunk);
-        }
-      });
-
-      stream.on('end', () => resolve({ audioBuffer: Buffer.concat(audioChunks), words }));
-      stream.on('error', (err) => reject(err));
-    });
-  }
-
-  private tryParseMetadata(chunk: Buffer): WordBoundaryMetadata | null {
-    try {
-      const parsed = JSON.parse(chunk.toString('utf8'));
-      if (parsed && parsed.type === 'WordBoundary') {
-        return parsed as WordBoundaryMetadata;
-      }
-      return null;
-    } catch {
-      return null;
-    }
   }
 }

@@ -39,7 +39,7 @@ export class RenderService {
     ]);
 
     const outputPath = path.join(outputDir, 'final.mp4');
-    const escapedAssPath = audio.subtitlesAssPath.replace(/\\/g, '/').replace(':', '\\:');
+    const escapedAssPath = this.escapeFfmpegFilterPath(audio.subtitlesAssPath);
 
     const audioFilterArgs = backgroundMusicPath
       ? this.buildDuckingFilter()
@@ -67,6 +67,17 @@ export class RenderService {
     }
 
     return { videoPath: outputPath, durationMs: audio.durationMs };
+  }
+
+  /**
+   * ffmpeg filtergraph syntax treats ':' as a key=value separator and ','
+   * as a filter separator, so a Windows path (drive letter colon) must be
+   * wrapped in single quotes and have its own single quotes/colons escaped.
+   */
+  private escapeFfmpegFilterPath(rawPath: string): string {
+    const forwardSlashed = rawPath.replace(/\\/g, '/');
+    const escaped = forwardSlashed.replace(/'/g, "'\\''").replace(/:/g, '\\:');
+    return `'${escaped}'`;
   }
 
   private buildDuckingFilter(): string[] {

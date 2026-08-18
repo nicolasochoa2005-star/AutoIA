@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GeneratedScript } from '../types/script.types';
+import { withRetry } from '../../common/retry';
 
 const SYSTEM_PROMPT = `Sos un guionista de YouTube Shorts. Generá una pieza de contenido corta (25-40s de locución) en formato JSON estricto, sin texto adicional fuera del JSON, con esta forma exacta:
 {
@@ -27,7 +28,7 @@ export class ScriptService {
     recentTitles: string[],
   ): Promise<GeneratedScript> {
     const model = this.client.getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-3.6-flash',
       generationConfig: { responseMimeType: 'application/json' },
     });
 
@@ -37,10 +38,24 @@ export class ScriptService {
 
     const prompt = `${SYSTEM_PROMPT}\n\nTema sugerido: ${topicHint}\n${historyBlock}`;
 
-    const result = await model.generateContent(prompt);
-    const raw = result.response.text();
+    const raw = await withRetry(
+      async () => {
+        const result = await model.generateContent(prompt);
+        return result.response.text();
+      },
+      {
+        maxAttempts: 3,
+        baseDelayMs: 2000,
+        isRetryable: this.isTransientError,
+      },
+    );
 
     return this.parseAndValidate(raw);
+  }
+
+  private isTransientError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /\[(429|500|503)/.test(message) || /timeout/i.test(message);
   }
 
   private parseAndValidate(raw: string): GeneratedScript {

@@ -40,7 +40,7 @@ El objetivo del proyecto es construir una plataforma web end-to-end compuesta po
 
 ### 3.1 Módulo 1: Investigación y Generación de Guion (LLM)
 
-El sistema solicita al modelo (Gemini 1.5 Flash / OpenAI GPT-4o-mini) la generación de una pieza estructurada en formato estricto JSON. Se le provee un historial de los últimos temas publicados para prevenir duplicidad.
+El sistema solicita al modelo (Gemini Flash, vía el alias `gemini-flash-latest` para no depender de una versión fija / OpenAI GPT-4o-mini) la generación de una pieza estructurada en formato estricto JSON. Se le provee un historial de los últimos temas publicados para prevenir duplicidad.
 
 ```json
 {
@@ -136,7 +136,7 @@ Aplica a todas las etapas del pipeline (3.1 a 3.7). Objetivo: evitar tanto reint
 
 | Módulo | Opción Base ($0 / Low-Cost) | Opción Escalada / GenAI | Costo Est. por Video (30s) |
 |---|---|---|---|
-| Guion & Prompts | Gemini 1.5 Flash (Free Tier) | OpenAI GPT-4o-mini | $0.0000 - $0.0020 USD |
+| Guion & Prompts | Gemini Flash (Free Tier) | OpenAI GPT-4o-mini | $0.0000 - $0.0020 USD |
 | Locución (TTS) | Edge-TTS (Open Source) | ElevenLabs API | $0.0000 - $0.0150 USD |
 | Recursos Visuales | Pexels API (Gratis) | Higgsfield AI API / Fal.ai | $0.0000 - $0.1500 USD |
 | Renderizado | FFmpeg local / VPS | Creatomate / Shotstack API | $0.0000 - $0.0500 USD |
