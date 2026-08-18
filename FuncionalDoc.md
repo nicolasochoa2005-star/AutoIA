@@ -291,6 +291,7 @@ Script local en Python/Node que ejecute el pipeline completo de 1 video (LLM →
 - Modelar y migrar el esquema de PostgreSQL (sección 6), incluyendo la columna `embedding` (pgvector).
 - Frontend (Next.js/Streamlit) conectado a la DB: tabla de videos con estados, reproductor embebido, panel de aprobación/rechazo con el checklist de QA visible (sección 3.6).
 - Esta fase es el primer punto en que un humano puede operar el sistema de punta a punta (revisar y aprobar), aunque la publicación siga siendo manual/fuera del sistema.
+- Selección de voz TTS configurable desde el Dashboard (selector de voces Edge-TTS, ej. por acento/región) en vez de la variable de entorno fija `EDGE_TTS_VOICE` usada en Fase 1. Por defecto en Fase 1 se usa español neutro (`es-ES-AlvaroNeural`).
 
 ### Fase 4 — Publicación vía YouTube Data API v3
 
