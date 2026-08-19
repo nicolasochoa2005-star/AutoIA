@@ -39,3 +39,11 @@ The system SHALL enqueue a daily generation job on a configurable cron schedule 
 - GIVEN a worker (or scheduler) with cron enabled
 - WHEN the scheduled time arrives
 - THEN one generation job is enqueued for the configured niche topic
+
+### Requirement: Log por intento de etapa
+The system SHALL record each stage attempt on the video (success or failure, optional provider and cost).
+
+#### Scenario: TTS ok
+- GIVEN TTS succeeds on first try
+- WHEN the stage completes
+- THEN a log row exists for stage TTS with success true

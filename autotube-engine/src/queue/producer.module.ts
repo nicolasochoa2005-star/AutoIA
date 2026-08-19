@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { DbModule } from '../db/db.module';
 import { PipelineProducerService } from './pipeline-producer.service';
 import { VIDEO_GENERATION_QUEUE } from './pipeline.queue';
 
@@ -13,6 +14,7 @@ import { VIDEO_GENERATION_QUEUE } from './pipeline.queue';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    DbModule,
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       inject: [ConfigService],

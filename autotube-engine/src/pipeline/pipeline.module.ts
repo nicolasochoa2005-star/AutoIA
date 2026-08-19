@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { DbModule } from '../db/db.module';
 import { ScriptService } from './script/script.service';
 import { GeminiProvider } from './script/providers/gemini.provider';
 import { GroqProvider } from './script/providers/groq.provider';
@@ -9,7 +10,7 @@ import { RenderService } from './render/render.service';
 import { PipelineService } from './pipeline.service';
 import { EmbeddingService } from './similarity/embedding.service';
 import { AntiRepetitionService } from './similarity/anti-repetition.service';
-import { FileScriptHistoryStore } from './similarity/file-history-store';
+import { PostgresScriptHistoryStore } from './similarity/postgres-history-store';
 import { HISTORY_STORE } from './similarity/history-store.token';
 import { ManifestService } from './manifest/manifest.service';
 import { StageGateService } from './manifest/stage-gate.service';
@@ -17,7 +18,7 @@ import { LibraryService } from './library/library.service';
 import { ComposeService } from './compose/compose.service';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true })],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), DbModule],
   providers: [
     ScriptService,
     GeminiProvider,
@@ -32,7 +33,7 @@ import { ComposeService } from './compose/compose.service';
     StageGateService,
     LibraryService,
     ComposeService,
-    { provide: HISTORY_STORE, useClass: FileScriptHistoryStore },
+    { provide: HISTORY_STORE, useClass: PostgresScriptHistoryStore },
   ],
   exports: [PipelineService],
 })

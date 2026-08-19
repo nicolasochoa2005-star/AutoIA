@@ -17,6 +17,9 @@ export interface StageGateOptions<T> {
   loadExisting: () => Promise<T>;
   generate: () => Promise<T>;
   interactiveLabel: string;
+  /** Worker/no-TTY: no bloquear en stdin. Default: process.stdin.isTTY */
+  allowInteractiveWait?: boolean;
+  onWaiting?: () => Promise<void>;
 }
 
 /**
@@ -44,6 +47,14 @@ export class StageGateService {
       if (await this.allExist(opts.expectedPaths)) {
         this.logger.log(`Etapa ya tiene artefactos provistos por el operador, se usan tal cual.`);
         return opts.loadExisting();
+      }
+      await opts.onWaiting?.();
+      const interactive =
+        opts.allowInteractiveWait ?? Boolean(process.stdin.isTTY);
+      if (!interactive) {
+        throw new Error(
+          `WAITING_FOR_INPUT: etapa en pausa, esperando artefactos en ${opts.expectedPaths.join(', ')}`,
+        );
       }
       const proceedWithAuto = await this.waitForOperator(opts.interactiveLabel, opts.expectedPaths);
       return proceedWithAuto ? opts.generate() : opts.loadExisting();

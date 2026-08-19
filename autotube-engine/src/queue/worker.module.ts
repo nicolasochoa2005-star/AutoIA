@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { PipelineModule } from '../pipeline/pipeline.module';
 import { ProducerModule } from './producer.module';
 import { PipelineProcessor } from './pipeline.processor';
-import { JobLogStore } from './job-log-store';
 
 /**
  * Proceso consumidor real (equivalente al "Generation Worker" del diagrama,
@@ -12,6 +11,6 @@ import { JobLogStore } from './job-log-store';
  */
 @Module({
   imports: [ProducerModule, PipelineModule],
-  providers: [PipelineProcessor, JobLogStore],
+  providers: [PipelineProcessor],
 })
 export class WorkerModule {}

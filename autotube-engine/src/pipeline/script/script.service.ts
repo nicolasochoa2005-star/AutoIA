@@ -27,6 +27,7 @@ function buildCharacterBlock(character: CharacterBible): string {
 export class ScriptService {
   private readonly logger = new Logger(ScriptService.name);
   private readonly providers: ScriptProvider[];
+  lastSuccessfulProvider: string | null = null;
 
   constructor(
     private readonly gemini: GeminiProvider,
@@ -62,6 +63,7 @@ export class ScriptService {
           baseDelayMs: 2000,
           isRetryable: (err) => provider.isTransientError(err),
         });
+        this.lastSuccessfulProvider = provider.name;
         return this.parseAndValidate(raw);
       } catch (err) {
         lastError = err;

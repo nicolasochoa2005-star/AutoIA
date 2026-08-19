@@ -1,4 +1,5 @@
 export interface ScriptHistoryEntry {
+  videoId?: string;
   title: string;
   hookType: string;
   embedding: number[];
@@ -6,10 +7,9 @@ export interface ScriptHistoryEntry {
 }
 
 /**
- * Persists script history for the anti-repetition filter. `FileScriptHistoryStore`
- * is the Fase 1/2 implementation (local JSON); ver FuncionalDoc.md sección 6 —
- * en Fase 3 se reemplaza por una implementación respaldada por la tabla `videos`
- * de PostgreSQL (columna `embedding`, pgvector) sin tocar el resto del filtro.
+ * Persists script history for the anti-repetition filter. `PostgresScriptHistoryStore`
+ * reads/writes `videos.embedding` (pgvector). The previous JSON file store is no
+ * longer the source of truth.
  */
 export interface ScriptHistoryStore {
   getRecent(limit: number): Promise<ScriptHistoryEntry[]>;

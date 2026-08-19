@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { Queue } from 'bullmq';
+import { VideoLifecycleService } from '../db/video-lifecycle.service';
 import { VIDEO_GENERATION_QUEUE, VideoGenerationJobData } from './pipeline.queue';
 
 @Injectable()
@@ -12,15 +13,17 @@ export class PipelineProducerService {
   constructor(
     @InjectQueue(VIDEO_GENERATION_QUEUE) private readonly queue: Queue<VideoGenerationJobData>,
     private readonly config: ConfigService,
+    private readonly videos: VideoLifecycleService,
   ) {}
 
   async enqueue(topicHint: string): Promise<string> {
+    const video = await this.videos.createQueued({ topicHint });
     const job = await this.queue.add(
       'generate-video',
-      { topicHint },
+      { topicHint, videoId: video.id },
       { attempts: 1, removeOnComplete: 100, removeOnFail: 500 },
     );
-    this.logger.log(`Job encolado (${job.id}): "${topicHint}"`);
+    this.logger.log(`Job encolado (${job.id}, video ${video.id}): "${topicHint}"`);
     return String(job.id);
   }
 

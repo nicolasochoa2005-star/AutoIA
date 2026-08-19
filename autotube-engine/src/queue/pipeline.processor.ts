@@ -1,10 +1,12 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
+import { VideoStatus } from '@prisma/client';
 import { Job } from 'bullmq';
 import * as path from 'path';
+import { VideoLifecycleService } from '../db/video-lifecycle.service';
+import { DEFAULT_STAGE_MODES } from '../pipeline/manifest/manifest.types';
 import { PipelineService } from '../pipeline/pipeline.service';
 import { classifyErrorReason } from './error-classifier';
-import { JobLogStore } from './job-log-store';
 import { VIDEO_GENERATION_QUEUE, VideoGenerationJobData } from './pipeline.queue';
 
 @Processor(VIDEO_GENERATION_QUEUE)
@@ -13,43 +15,36 @@ export class PipelineProcessor extends WorkerHost {
 
   constructor(
     private readonly pipelineService: PipelineService,
-    private readonly jobLogStore: JobLogStore,
+    private readonly videos: VideoLifecycleService,
   ) {
     super();
   }
 
   async process(job: Job<VideoGenerationJobData>): Promise<void> {
-    const { topicHint } = job.data;
+    const { topicHint, videoId } = job.data;
     const workDir = path.join(process.cwd(), 'output', `job_${job.id}`);
 
-    this.logger.log(`Procesando job ${job.id}: "${topicHint}"`);
+    this.logger.log(`Procesando job ${job.id} (video ${videoId}): "${topicHint}"`);
 
     try {
-      await this.pipelineService.run(topicHint, workDir);
-      await this.jobLogStore.append({
-        jobId: String(job.id),
+      await this.pipelineService.runWithOptions({
         topicHint,
-        success: true,
-        createdAt: new Date().toISOString(),
+        runDir: workDir,
+        modes: DEFAULT_STAGE_MODES,
+        videoId,
       });
     } catch (error) {
       const errorReason = classifyErrorReason(error);
       const errorDetail = error instanceof Error ? error.message : String(error);
 
-      await this.jobLogStore.append({
-        jobId: String(job.id),
-        topicHint,
-        success: false,
-        errorReason,
-        errorDetail,
-        createdAt: new Date().toISOString(),
-      });
+      if (errorReason === 'WAITING_FOR_INPUT') {
+        await this.videos.setStatus(videoId, VideoStatus.WAITING_FOR_INPUT);
+        this.logger.warn(`Job ${job.id} en WAITING_FOR_INPUT: ${errorDetail}`);
+        return;
+      }
 
+      await this.videos.setStatus(videoId, VideoStatus.ERROR, { errorReason });
       this.logger.error(`Job ${job.id} falló con motivo ${errorReason}: ${errorDetail}`);
-
-      // No se reintenta el pipeline completo a nivel de job (ver política de
-      // errores 3.8, regla 4 de idempotencia): los reintentos transitorios ya
-      // se manejan dentro de cada etapa. Un fallo acá pasa a estado ERROR.
       throw error;
     }
   }

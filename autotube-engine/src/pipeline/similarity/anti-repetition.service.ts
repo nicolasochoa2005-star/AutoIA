@@ -99,8 +99,13 @@ export class AntiRepetitionService {
     return this.embeddingService.embed(script.guion_locucion);
   }
 
-  async recordPublished(script: GeneratedScript, embedding: number[]): Promise<void> {
+  async recordPublished(
+    script: GeneratedScript,
+    embedding: number[],
+    videoId?: string,
+  ): Promise<void> {
     await this.historyStore.save({
+      videoId,
       title: script.titulo,
       hookType: this.classifyHook(script.guion_locucion),
       embedding,

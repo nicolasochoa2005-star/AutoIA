@@ -11,4 +11,6 @@ export interface RunOptions {
   resumeFrom?: StageName;
   /** Si es una corrida `--resume`, el manifest ya existente a continuar. */
   resumeManifestPresent?: boolean;
+  /** Fila `videos` asociada a esta corrida (enqueue o CLI). */
+  videoId?: string;
 }
