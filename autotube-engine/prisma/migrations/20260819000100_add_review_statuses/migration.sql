@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "VideoStatus" ADD VALUE 'APPROVED';
+ALTER TYPE "VideoStatus" ADD VALUE 'REJECTED';

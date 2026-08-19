@@ -20,6 +20,12 @@ The system SHALL generate and render Shorts without requiring a human during aut
 - WHEN no human has approved it
 - THEN the system MUST NOT treat it as published
 
+#### Scenario: Aprobación en Dashboard
+- GIVEN a video in `READY_FOR_REVIEW`
+- WHEN a human approves it in the Dashboard
+- THEN the video becomes eligible for publish
+- AND automatic CRON generation still does not upload
+
 ### Requirement: Un change un rol
 The project SHALL assign each OpenSpec change to a single owning role (Engine, Studio, Dashboard, or Producto) so two workstreams do not edit the same behavior in one PR.
 

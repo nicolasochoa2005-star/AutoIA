@@ -2,6 +2,63 @@ import { Injectable } from '@nestjs/common';
 import { VideoStatus } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 import { GeneratedScript, VisualClip } from '../pipeline/types/script.types';
+import { ReviewConflictError, ReviewValidationError, VideoNotFoundError } from './video-review.errors';
+
+const VIDEO_LIST_SELECT = {
+  id: true,
+  title: true,
+  status: true,
+  errorReason: true,
+  createdAt: true,
+  reviewedAt: true,
+} as const;
+
+const VIDEO_DETAIL_SELECT = {
+  id: true,
+  title: true,
+  status: true,
+  errorReason: true,
+  createdAt: true,
+  reviewedAt: true,
+  description: true,
+  tags: true,
+  script: true,
+  runDir: true,
+  videoUrl: true,
+  reviewedBy: true,
+  reviewNotes: true,
+  characterId: true,
+  hookType: true,
+} as const;
+
+export type VideoListItem = {
+  id: string;
+  title: string;
+  status: VideoStatus;
+  errorReason: string | null;
+  createdAt: Date;
+  reviewedAt: Date | null;
+};
+
+export type VideoDetail = VideoListItem & {
+  description: string | null;
+  tags: string[];
+  script: string | null;
+  runDir: string | null;
+  videoUrl: string | null;
+  reviewedBy: string | null;
+  reviewNotes: string | null;
+  characterId: string | null;
+  hookType: string | null;
+};
+
+export type ReviewAction = 'approve' | 'reject';
+
+export interface ReviewInput {
+  action: ReviewAction;
+  notes?: string;
+  reviewedBy: string;
+}
 
 export interface CreateQueuedVideoInput {
   topicHint: string;
@@ -43,6 +100,52 @@ export class VideoLifecycleService {
       where: { runDir },
       orderBy: { createdAt: 'desc' },
       select: { id: true },
+    });
+  }
+
+  async list(status?: VideoStatus): Promise<VideoListItem[]> {
+    return this.prisma.video.findMany({
+      where: status ? { status } : undefined,
+      orderBy: { createdAt: 'desc' },
+      select: VIDEO_LIST_SELECT,
+    });
+  }
+
+  async findById(id: string): Promise<VideoDetail | null> {
+    return this.prisma.video.findUnique({
+      where: { id },
+      select: VIDEO_DETAIL_SELECT,
+    });
+  }
+
+  async review(id: string, input: ReviewInput): Promise<VideoDetail> {
+    if (input.action === 'reject' && !input.notes?.trim()) {
+      throw new ReviewValidationError('Reject requires notes');
+    }
+
+    const current = await this.prisma.video.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!current) {
+      throw new VideoNotFoundError(id);
+    }
+    if (current.status !== VideoStatus.READY_FOR_REVIEW) {
+      throw new ReviewConflictError(
+        `Video is ${current.status}, expected READY_FOR_REVIEW`,
+      );
+    }
+
+    const status = input.action === 'approve' ? VideoStatus.APPROVED : VideoStatus.REJECTED;
+    return this.prisma.video.update({
+      where: { id },
+      data: {
+        status,
+        reviewedAt: new Date(),
+        reviewedBy: input.reviewedBy.trim().slice(0, 100) || 'operator',
+        reviewNotes: input.notes?.trim() || null,
+      },
+      select: VIDEO_DETAIL_SELECT,
     });
   }
 
