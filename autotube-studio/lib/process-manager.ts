@@ -10,14 +10,8 @@ interface RunProcess {
   exitCode: number | null;
 }
 
-// Next.js dev/prod corre en un único proceso Node; un Map a nivel de módulo
-// alcanza para uso local de un operador (no está pensado para multi-instancia).
 const processes = new Map<string, RunProcess>();
 
-// Se invoca ts-node directo (vía `node`, sin `npm run` ni shell) para evitar
-// dos problemas de Windows: `spawn EINVAL` al ejecutar `npm.cmd` sin shell, y
-// el escapado roto de argumentos con espacios (ej. "...YT IA\...") que
-// `shell: true` produce en cmd.exe. Sin shell, Node arma el argv correctamente.
 const TS_NODE_BIN = path.join(ENGINE_DIR, 'node_modules', 'ts-node', 'dist', 'bin.js');
 const CLI_ENTRY = path.join(ENGINE_DIR, 'src', 'cli.ts');
 
@@ -33,6 +27,18 @@ export function hasProcess(runId: string): boolean {
 export interface StartRunOptions {
   characterId?: string;
   from?: StageName;
+  ttsProvider?: 'edge-tts' | 'elevenlabs';
+  identityProvider?: 'local' | 'fal';
+  narrativeProfile?: 'autopilot' | 'directed';
+  promptOverride?: string;
+  composeImagePaths?: string[];
+  backgroundMusicPath?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+  vcodec?: string;
+  acodec?: string;
+  durationSec?: number;
 }
 
 /** Arranca (o continúa) una corrida vía CLI en modo `--interactive`. */
@@ -48,6 +54,20 @@ export function startRun(runId: string, topicHint: string, opts: StartRunOptions
   ];
   if (opts.characterId) args.push('--character', opts.characterId);
   if (opts.from) args.push('--from', opts.from);
+  if (opts.ttsProvider) args.push('--tts-provider', opts.ttsProvider);
+  if (opts.identityProvider) args.push('--identity-provider', opts.identityProvider);
+  if (opts.narrativeProfile) args.push('--narrative-profile', opts.narrativeProfile);
+  if (opts.promptOverride) args.push('--prompt-override', opts.promptOverride);
+  for (const imagePath of opts.composeImagePaths ?? []) {
+    args.push('--compose-image', imagePath);
+  }
+  if (opts.backgroundMusicPath) args.push('--background-music', opts.backgroundMusicPath);
+  if (opts.width) args.push('--width', String(opts.width));
+  if (opts.height) args.push('--height', String(opts.height));
+  if (opts.fps) args.push('--fps', String(opts.fps));
+  if (opts.vcodec) args.push('--vcodec', opts.vcodec);
+  if (opts.acodec) args.push('--acodec', opts.acodec);
+  if (opts.durationSec) args.push('--duration', String(opts.durationSec));
 
   const child = spawn(process.execPath, [TS_NODE_BIN, ...args], { cwd: ENGINE_DIR });
   const record: RunProcess = { child, logs: [], exited: false, exitCode: null };
@@ -62,7 +82,6 @@ export function startRun(runId: string, topicHint: string, opts: StartRunOptions
   processes.set(runId, record);
 }
 
-/** Equivale a apretar ENTER en la terminal: confirma generar automáticamente la etapa en pausa. */
 export function confirmWaiting(runId: string): boolean {
   const p = processes.get(runId);
   if (!p || p.exited || !p.child.stdin) return false;
@@ -80,7 +99,6 @@ export function getProcessState(runId: string): { running: boolean; exitCode: nu
   return { running: !p.exited, exitCode: p.exitCode };
 }
 
-/** Última etiqueta de pausa emitida por el Engine (StageGateService/ComposeService), si la hay. */
 export function lastWaitingLabel(runId: string): string | null {
   const logs = getLogs(runId);
   const matches = [...logs.matchAll(/⏸[^\n]*/g)];

@@ -18,3 +18,10 @@ export class ReviewValidationError extends Error {
     this.name = 'ReviewValidationError';
   }
 }
+
+export class PublishConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PublishConflictError';
+  }
+}

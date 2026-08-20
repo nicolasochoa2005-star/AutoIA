@@ -16,6 +16,10 @@ import { ManifestService } from './manifest/manifest.service';
 import { StageGateService } from './manifest/stage-gate.service';
 import { LibraryService } from './library/library.service';
 import { ComposeService } from './compose/compose.service';
+import { CostCapService } from '../cost/cost-cap.service';
+import { EdgeTtsProvider } from './tts/providers/edge-tts.provider';
+import { ElevenLabsTtsProvider } from './tts/providers/elevenlabs-tts.provider';
+import { FalIdentityProvider } from './visuals/fal-identity.provider';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), DbModule],
@@ -33,6 +37,10 @@ import { ComposeService } from './compose/compose.service';
     StageGateService,
     LibraryService,
     ComposeService,
+    CostCapService,
+    EdgeTtsProvider,
+    ElevenLabsTtsProvider,
+    FalIdentityProvider,
     { provide: HISTORY_STORE, useClass: PostgresScriptHistoryStore },
   ],
   exports: [PipelineService],

@@ -239,3 +239,56 @@ textarea {
   padding: 10px;
   font-size: 0.9rem;
 }
+
+.kpi-grid {
+  display: grid;
+  gap: 12px;
+}
+
+@media (min-width: 700px) {
+  .kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.kpi-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+}
+
+.kpi-card h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.kpi-value {
+  margin: 6px 0 4px;
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.kpi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.kpi-table th,
+.kpi-table td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.badge.quota-ok {
+  background: var(--ok);
+  color: #fff;
+}
+
+.badge.quota-exceeded {
+  background: var(--error-ink);
+  color: #fff;
+}

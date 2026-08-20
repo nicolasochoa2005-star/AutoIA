@@ -5,58 +5,10 @@ import { PipelineModule } from './pipeline/pipeline.module';
 import { PipelineService } from './pipeline/pipeline.service';
 import { DEFAULT_STAGE_MODES, StageModesConfig, StageName } from './pipeline/manifest/manifest.types';
 import { RunOptions } from './pipeline/run-options.types';
+import { CliArgs, parseCliArgs } from './cli-args';
 
 const logger = new Logger('CLI');
 const STAGE_NAMES: StageName[] = ['script', 'tts', 'visuals', 'render'];
-
-interface CliArgs {
-  topicHint: string;
-  resumeDir?: string;
-  from?: StageName;
-  interactive: boolean;
-  characterId?: string;
-  overridePaths: Partial<Record<StageName, string>>;
-}
-
-function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { topicHint: '', interactive: false, overridePaths: {} };
-  const positional: string[] = [];
-
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    switch (arg) {
-      case '--resume':
-        args.resumeDir = argv[++i];
-        break;
-      case '--from':
-        args.from = argv[++i] as StageName;
-        break;
-      case '--interactive':
-        args.interactive = true;
-        break;
-      case '--character':
-        args.characterId = argv[++i];
-        break;
-      case '--override-script':
-        args.overridePaths.script = argv[++i];
-        break;
-      case '--override-tts':
-        args.overridePaths.tts = argv[++i];
-        break;
-      case '--override-visuals':
-        args.overridePaths.visuals = argv[++i];
-        break;
-      case '--override-render':
-        args.overridePaths.render = argv[++i];
-        break;
-      default:
-        positional.push(arg);
-    }
-  }
-
-  args.topicHint = positional.join(' ');
-  return args;
-}
 
 function buildStageModes(args: CliArgs): StageModesConfig {
   const modes: StageModesConfig = { ...DEFAULT_STAGE_MODES };
@@ -70,16 +22,28 @@ function buildStageModes(args: CliArgs): StageModesConfig {
 }
 
 async function bootstrap() {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseCliArgs(process.argv.slice(2));
 
   if (!args.topicHint && !args.resumeDir) {
     logger.error(
-      'Uso: npm run cli -- "<tema sugerido>" [--interactive] [--character <id>] [--resume <dir> [--from <etapa>]] [--override-<etapa> <archivo>]',
+      'Uso: npm run cli -- "<tema sugerido>" [--interactive] [--character <id>] [--narrative-profile autopilot|directed] [--tts-provider edge-tts|elevenlabs] [--identity-provider local|fal] [--prompt-override <texto>] [--compose-image <archivo>] [--background-music <archivo>] [--width <n>] [--height <n>] [--fps <n>] [--vcodec <codec>] [--acodec <codec>] [--duration <s>] [--resume <dir> [--from <etapa>]] [--override-<etapa> <archivo>]',
     );
     process.exit(1);
   }
   if (args.from && !STAGE_NAMES.includes(args.from)) {
     logger.error(`--from debe ser una de: ${STAGE_NAMES.join(', ')}`);
+    process.exit(1);
+  }
+  if (args.ttsProvider && args.ttsProvider !== 'edge-tts' && args.ttsProvider !== 'elevenlabs') {
+    logger.error('--tts-provider debe ser edge-tts o elevenlabs');
+    process.exit(1);
+  }
+  if (args.identityProvider && args.identityProvider !== 'local' && args.identityProvider !== 'fal') {
+    logger.error('--identity-provider debe ser local o fal');
+    process.exit(1);
+  }
+  if (args.narrativeProfile && args.narrativeProfile !== 'autopilot' && args.narrativeProfile !== 'directed') {
+    logger.error('--narrative-profile debe ser autopilot o directed');
     process.exit(1);
   }
 
@@ -97,8 +61,15 @@ async function bootstrap() {
     runDir,
     modes: buildStageModes(args),
     characterId: args.characterId,
+    ttsProvider: args.ttsProvider,
+    identityProvider: args.identityProvider,
+    narrativeProfile: args.narrativeProfile,
     overridePaths: args.overridePaths,
     resumeFrom: args.from,
+    promptOverride: args.promptOverride,
+    composeImagePaths: args.composeImagePaths.length ? args.composeImagePaths : undefined,
+    backgroundMusicPath: args.backgroundMusicPath,
+    render: Object.keys(args.render).length ? args.render : undefined,
   };
 
   try {

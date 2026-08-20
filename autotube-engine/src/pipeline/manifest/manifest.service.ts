@@ -27,12 +27,14 @@ export class ManifestService {
     topicHint: string,
     modes: StageModesConfig = DEFAULT_STAGE_MODES,
     characterId?: string,
+    narrativeProfile?: 'autopilot' | 'directed',
   ): Promise<RunManifest> {
     const now = new Date().toISOString();
     const manifest: RunManifest = {
       runId,
       topicHint,
       characterId,
+      narrativeProfile,
       stages: Object.fromEntries(
         STAGE_ORDER.map((stage) => [
           stage,

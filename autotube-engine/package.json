@@ -11,6 +11,8 @@
     "cli": "ts-node -r tsconfig-paths/register src/cli.ts",
     "worker": "ts-node -r tsconfig-paths/register src/worker.ts",
     "enqueue": "ts-node -r tsconfig-paths/register src/enqueue.ts",
+    "publish": "ts-node -r tsconfig-paths/register src/publish.ts",
+    "youtube:auth": "ts-node -r tsconfig-paths/register src/youtube-auth.ts",
     "api": "ts-node -r tsconfig-paths/register src/main.ts",
     "start:api": "node dist/main.js",
     "prisma:generate": "prisma generate",
@@ -37,6 +39,7 @@
     "axios": "^1.19.0",
     "bullmq": "^6.1.2",
     "edge-tts-universal": "^1.4.0",
+    "googleapis": "^176.0.0",
     "ioredis": "^6.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"

@@ -1,13 +1,28 @@
 'use client';
 
-import { useMemo } from 'react';
-import { ReactFlow, Background, Controls, type Node, type Edge, type NodeTypes } from '@xyflow/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  addEdge,
+  useEdgesState,
+  useNodesState,
+  type Connection,
+  type Edge,
+  type Node,
+  type NodeTypes,
+} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { buildDefaultTemplate, DomainNodeData } from '@/lib/graph-layout';
-import { DomainNode, RenderStatus, StudioNodeData } from './DomainNode';
-import type { CharacterSummary, RunStatus, StageName } from '@/lib/types';
+import { ComfyNode, type ComfyNodeData, type RenderStatus } from './ComfyNode';
+import { NodePalette } from './NodePalette';
+import { compileWorkflow, hydrateWorkflow, playStageForNode, serializeWorkflow, socketsCompatible, type CompiledRun, type SerializedWorkflow } from '@/lib/nodes/compiler';
+import { buildDefaultTemplate, defaultNodeData, type StudioNodeData } from '@/lib/nodes/template';
+import { parseHandleId, SOCKET_COLORS, type StudioNodeType } from '@/lib/nodes/types';
+import type { RunStatus, StageName } from '@/lib/types';
 
-const nodeTypes: NodeTypes = { domain: DomainNode };
+const nodeTypes: NodeTypes = { comfy: ComfyNode };
+const WORKFLOW_KEY = 'autotube-studio:workflow';
 
 function artifactUrl(runId: string, relativePath: string): string {
   return `/api/runs/${runId}/artifact?path=${encodeURIComponent(relativePath)}`;
@@ -28,145 +43,203 @@ function composeBeatIndex(waitingLabel: string | null): number | null {
   return match ? Number(match[1]) : null;
 }
 
+function edgeStroke(edge: Edge): string {
+  const parsed = parseHandleId(edge.sourceHandle);
+  return parsed ? SOCKET_COLORS[parsed.socket] : '#6b7280';
+}
+
 export interface StudioCanvasProps {
   status: RunStatus | null;
-  characters: CharacterSummary[];
-  selectedCharacterId?: string;
-  onSelectCharacter: (id: string) => void;
   onPlay: () => void;
   onPlayNode: (stage: StageName) => void;
   onDrop: (slot: 'script' | 'render' | 'beat', file: File, beatIndex?: number) => void;
-  onDropTts: (audio: File, subtitles: File) => void;
+  onWorkflowChange?: (compiled: CompiledRun, files: Map<string, File>, serialized: SerializedWorkflow) => void;
 }
 
 export function StudioCanvas(props: StudioCanvasProps) {
-  const { status, characters, selectedCharacterId, onSelectCharacter, onPlay, onPlayNode, onDrop, onDropTts } = props;
+  const { status, onPlay, onPlayNode, onDrop, onWorkflowChange } = props;
+  const initial = useMemo(() => buildDefaultTemplate(), []);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes as Node<ComfyNodeData>[]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
+  const filesRef = useRef<Map<string, File>>(new Map());
+  const updateRef = useRef<(id: string, patch: Partial<StudioNodeData>) => void>(() => undefined);
+  const [ready, setReady] = useState(false);
 
-  const { nodes, edges } = useMemo(() => {
-    const template = buildDefaultTemplate();
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(WORKFLOW_KEY);
+      if (raw) {
+        const stored = hydrateWorkflow(JSON.parse(raw));
+        if (stored) {
+          setNodes(stored.nodes as Node<ComfyNodeData>[]);
+          setEdges(stored.edges);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    setReady(true);
+  }, [setNodes, setEdges]);
+
+  updateRef.current = (id, patch) => {
+    setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
+  };
+
+  const persistAndCompile = useCallback(
+    (nextNodes: Node<ComfyNodeData>[], nextEdges: Edge[]) => {
+      const serialized = serializeWorkflow(nextNodes, nextEdges);
+      try {
+        window.localStorage.setItem(WORKFLOW_KEY, JSON.stringify(serialized));
+      } catch {
+        // quota / private mode
+      }
+      const compiled = compileWorkflow(nextNodes, nextEdges, '');
+      onWorkflowChange?.(compiled, filesRef.current, serialized);
+    },
+    [onWorkflowChange],
+  );
+
+  useEffect(() => {
+    if (!ready) return;
+    persistAndCompile(nodes, edges);
+  }, [ready, nodes, edges, persistAndCompile]);
+
+  useEffect(() => {
     const running = status?.running ?? false;
     const waiting = status?.waiting ?? false;
     const waitingLabel = status?.waitingLabel ?? null;
     const beatIndex = composeBeatIndex(waitingLabel);
-    // Deshabilitar botones solo mientras algo se está GENERANDO de verdad;
-    // el proceso sigue "vivo" también mientras está en pausa esperando al
-    // operador, que es justo cuando el botón Play debe estar habilitado.
     const busy = running && !waiting;
 
-    const nodes: Node<StudioNodeData>[] = template.nodes.map((n) => {
-      const base: DomainNodeData = n.data;
-      let studioData: StudioNodeData = { ...base, status: 'idle', disabled: busy };
+    setNodes((nds) =>
+      nds.map((n) => {
+        const nodeType = n.data.nodeType;
+        const overlay: Partial<ComfyNodeData> = {
+          disabled: busy,
+          onWidgetChange: (patch) => updateRef.current(n.id, patch),
+          onPickFile: (file) => {
+            filesRef.current.set(n.id, file);
+            const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+            updateRef.current(n.id, { fileName: file.name, previewUrl });
+          },
+        };
 
-      if (!status) {
-        return { ...n, data: studioData };
-      }
+        if (!status) {
+          return { ...n, data: { ...n.data, ...overlay, status: n.data.fileName || n.data.text ? 'done' : 'idle' } };
+        }
 
-      switch (base.nodeType) {
-        case 'character':
-          studioData = {
-            ...studioData,
-            status: selectedCharacterId ? 'done' : 'idle',
-            characters,
-            selectedCharacterId,
-            onSelectCharacter,
-          };
-          break;
-        case 'script': {
-          const s = stageStatus(status, 'script');
-          studioData = {
-            ...studioData,
-            status: s,
-            waitingLabel: s === 'waiting' ? waitingLabel : null,
-            onPlay: s === 'waiting' ? onPlay : undefined,
-            onPlayNode: s === 'done' ? () => onPlayNode('script') : undefined,
-            onDropFile: s === 'waiting' ? (file) => onDrop('script', file) : undefined,
-          };
-          break;
-        }
-        case 'tts': {
-          const s = stageStatus(status, 'tts');
-          studioData = {
-            ...studioData,
-            status: s,
-            waitingLabel: s === 'waiting' ? waitingLabel : null,
-            onPlay: s === 'waiting' ? onPlay : undefined,
-            onPlayNode: s === 'done' ? () => onPlayNode('tts') : undefined,
-          };
-          break;
-        }
-        case 'visuals': {
-          const s = stageStatus(status, 'visuals');
-          studioData = {
-            ...studioData,
-            status: s,
-            waitingLabel: s === 'waiting' ? waitingLabel : null,
-            onPlay: s === 'waiting' ? onPlay : undefined,
-            onPlayNode: s === 'done' ? () => onPlayNode('visuals') : undefined,
-          };
-          break;
-        }
-        case 'compose': {
+        const stage = playStageForNode(nodeType);
+        if (nodeType === 'compose') {
           const visualsStatus = stageStatus(status, 'visuals');
           const isComposeWait =
             status.activeStage === 'visuals' && status.waiting && Boolean(waitingLabel?.includes('Compose'));
           const s: RenderStatus = isComposeWait ? 'waiting' : visualsStatus === 'waiting' ? 'pending' : visualsStatus;
-          studioData = {
-            ...studioData,
-            status: s,
-            waitingLabel: isComposeWait ? waitingLabel : null,
-            onPlay: isComposeWait ? onPlay : undefined,
-            onDropFile:
-              isComposeWait && beatIndex
-                ? (file) => onDrop('beat', file, beatIndex)
-                : undefined,
-          };
-          break;
+          overlay.status = s;
+          overlay.waitingLabel = isComposeWait ? waitingLabel : null;
+          overlay.onPlay = isComposeWait ? onPlay : undefined;
+          overlay.onPlayNode = s === 'done' ? () => onPlayNode('visuals') : undefined;
+          overlay.onDropFile =
+            isComposeWait && beatIndex ? (file) => onDrop('beat', file, beatIndex) : undefined;
+        } else if (stage) {
+          const s = stageStatus(status, stage);
+          overlay.status = s;
+          overlay.waitingLabel = s === 'waiting' ? waitingLabel : null;
+          overlay.onPlay = s === 'waiting' ? onPlay : undefined;
+          overlay.onPlayNode = s === 'done' ? () => onPlayNode(stage) : undefined;
+          if (nodeType === 'script' && s === 'waiting') {
+            overlay.onDropFile = (file) => onDrop('script', file);
+          }
+          if (nodeType === 'saveVideo') {
+            const canPlay = stageStatus(status, 'tts') === 'done' && stageStatus(status, 'visuals') === 'done';
+            overlay.waitingLabel =
+              s === 'waiting'
+                ? waitingLabel
+                : !canPlay
+                  ? 'Requiere TTS y visuales listos antes de poder renderizar.'
+                  : null;
+            overlay.onPlayNode = s === 'done' && canPlay ? () => onPlayNode('render') : undefined;
+            overlay.thumbnailUrl =
+              s === 'done' && status.manifest ? artifactUrl(status.runId, '04_render/final.mp4') : undefined;
+          }
+        } else if (nodeType === 'loadImage' || nodeType === 'loadAudio' || nodeType === 'prompt') {
+          overlay.status = n.data.fileName || n.data.text ? 'done' : 'idle';
         }
-        case 'render': {
-          const s = stageStatus(status, 'render');
-          const canPlay = stageStatus(status, 'tts') === 'done' && stageStatus(status, 'visuals') === 'done';
-          studioData = {
-            ...studioData,
-            status: s,
-            waitingLabel: s === 'waiting' ? waitingLabel : !canPlay ? 'Requiere TTS y Visuales listos antes de poder renderizar.' : null,
-            onPlay: s === 'waiting' ? onPlay : undefined,
-            onPlayNode: s === 'done' && canPlay ? () => onPlayNode('render') : undefined,
-            onDropFile: s === 'waiting' ? (file) => onDrop('render', file) : undefined,
-            thumbnailUrl:
-              s === 'done' && status.manifest
-                ? artifactUrl(status.runId, '04_render/final.mp4')
-                : undefined,
-          };
-          break;
-        }
-        case 'preview': {
-          const renderStatus = stageStatus(status, 'render');
-          studioData = {
-            ...studioData,
-            status: renderStatus,
-            thumbnailUrl:
-              renderStatus === 'done' && status.manifest
-                ? artifactUrl(status.runId, '04_render/final.mp4')
-                : undefined,
-          };
-          break;
-        }
-      }
 
-      return { ...n, data: studioData };
-    });
+        return { ...n, data: { ...n.data, ...overlay } };
+      }),
+    );
+  }, [status, onPlay, onPlayNode, onDrop, setNodes]);
 
-    return { nodes, edges: template.edges as Edge[] };
-  }, [status, characters, selectedCharacterId, onSelectCharacter, onPlay, onPlayNode, onDrop]);
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      if (!socketsCompatible(connection.sourceHandle, connection.targetHandle)) return;
+      setEdges((eds) => {
+        const replaced = eds.filter(
+          (e) => !(e.target === connection.target && e.targetHandle === connection.targetHandle),
+        );
+        const parsed = parseHandleId(connection.sourceHandle);
+        return addEdge(
+          { ...connection, style: { stroke: parsed ? SOCKET_COLORS[parsed.socket] : '#6b7280' } },
+          replaced,
+        );
+      });
+    },
+    [setEdges],
+  );
 
-  void onDropTts; // reservado para un dropzone dedicado de TTS (mp3+ass) si se necesita más adelante
+  const isValidConnection = useCallback(
+    (connection: Connection | Edge) => socketsCompatible(connection.sourceHandle, connection.targetHandle),
+    [],
+  );
+
+  const addNode = useCallback(
+    (type: StudioNodeType) => {
+      const id = `${type}_${Date.now()}`;
+      setNodes((nds) => [
+        ...nds,
+        {
+          id,
+          type: 'comfy',
+          position: { x: 120 + (nds.length % 5) * 24, y: 80 + (nds.length % 8) * 24 },
+          data: {
+            ...defaultNodeData(type),
+            onWidgetChange: (patch) => updateRef.current(id, patch),
+            onPickFile: (file) => {
+              filesRef.current.set(id, file);
+              const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+              updateRef.current(id, { fileName: file.name, previewUrl });
+            },
+          },
+        },
+      ]);
+    },
+    [setNodes],
+  );
+
+  const styledEdges = useMemo(
+    () => edges.map((e) => ({ ...e, style: { ...e.style, stroke: edgeStroke(e) } })),
+    [edges],
+  );
 
   return (
-    <div style={{ width: '100%', height: '70vh', background: '#0b1120' }}>
-      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView>
-        <Background />
-        <Controls />
-      </ReactFlow>
+    <div style={{ display: 'flex', width: '100%', height: '75vh', background: '#0b1120', borderRadius: 8, overflow: 'hidden' }}>
+      <NodePalette onAdd={addNode} />
+      <div style={{ flex: 1 }}>
+        <ReactFlow
+          nodes={nodes}
+          edges={styledEdges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          isValidConnection={isValidConnection}
+          fitView
+          deleteKeyCode={['Backspace', 'Delete']}
+        >
+          <Background />
+          <Controls />
+        </ReactFlow>
+      </div>
     </div>
   );
 }

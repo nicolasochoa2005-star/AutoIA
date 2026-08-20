@@ -55,6 +55,18 @@ export class ComposeService {
     ]);
   }
 
+  /** Overlay de dos archivos arbitrarios (nodos LoadImage → Compose). */
+  async overlayFiles(subjectPath: string, outfitPath: string, outputPath: string): Promise<void> {
+    await this.runFfmpeg([
+      '-y',
+      '-i', subjectPath,
+      '-i', outfitPath,
+      '-filter_complex', '[0:v][1:v]overlay=0:0',
+      '-frames:v', '1',
+      outputPath,
+    ]);
+  }
+
   private async waitForDrop(expectedPath: string): Promise<void> {
     const timeoutMs = this.config.get<number>('COMPOSE_WAIT_TIMEOUT_MS');
     const startedAt = Date.now();

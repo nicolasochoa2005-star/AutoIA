@@ -18,6 +18,11 @@ import { RunOptions } from './run-options.types';
 import { VideoLifecycleService } from '../db/video-lifecycle.service';
 import { VideoLogService } from '../db/video-log.service';
 import { PipelineStageName } from '../db/video-status';
+import { DIRECTED_MAX_TTS_MS } from './script/script-narrative.validator';
+import {
+  DEFAULT_NARRATIVE_PROFILE,
+  type NarrativeProfile,
+} from './script/narrative-profile';
 
 @Injectable()
 export class PipelineService {
@@ -48,6 +53,7 @@ export class PipelineService {
     const character = options.characterId ? await this.library.loadCharacter(options.characterId) : undefined;
 
     let manifest = await this.manifestService.load(runDir);
+    options.narrativeProfile = this.resolveNarrativeProfile(options, manifest);
     if (!manifest) {
       manifest = await this.manifestService.initialize(
         runDir,
@@ -55,6 +61,7 @@ export class PipelineService {
         options.topicHint,
         options.modes,
         options.characterId,
+        options.narrativeProfile,
       );
     } else {
       options.topicHint = options.topicHint || manifest.topicHint;
@@ -112,14 +119,17 @@ export class PipelineService {
         },
         generate: async () => {
           const result = await this.antiRepetitionService.generateNonRepetitive(
-            options.topicHint,
+            options.promptOverride?.trim()
+              ? `${options.topicHint}\n\nDirección: ${options.promptOverride.trim()}`
+              : options.topicHint,
             character,
+            options.narrativeProfile,
           );
           await fs.writeFile(paths.script, JSON.stringify(result.script, null, 2), 'utf-8');
           return { script: result.script, embedding: result.embedding };
         },
       }),
-      () => this.scriptService.lastSuccessfulProvider ?? 'gemini',
+      () => ({ provider: this.scriptService.lastSuccessfulProvider ?? 'gemini' }),
     );
 
     this.logger.log(`Guion listo: "${script.titulo}"`);
@@ -151,9 +161,18 @@ export class PipelineService {
         interactiveLabel: 'audio (02_audio/voice.mp3 + subtitles.ass)',
         onWaiting: () => this.setVideoStatus(options.videoId, VideoStatus.WAITING_FOR_INPUT),
         loadExisting: () => this.ttsService.loadExisting(paths.audioDir),
-        generate: () => this.ttsService.synthesize(script.guion_locucion, paths.audioDir),
+        generate: async () => {
+          const audio = await this.ttsService.synthesize(script.guion_locucion, paths.audioDir, {
+            videoId: options.videoId,
+            provider: options.ttsProvider,
+          });
+          if (options.narrativeProfile === 'directed' && audio.durationMs > DIRECTED_MAX_TTS_MS) {
+            throw new Error('SCRIPT_TOO_LONG: la locución supera 30 segundos; no se recorta');
+          }
+          return audio;
+        },
       }),
-      () => 'edge-tts',
+      () => ({ provider: this.ttsService.lastProvider, costUsd: this.ttsService.lastCostUsd }),
     );
 
     this.logger.log(`Audio listo (${(audio.durationMs / 1000).toFixed(1)}s)`);
@@ -186,9 +205,21 @@ export class PipelineService {
         interactiveLabel: 'visuales (03_visuals/)',
         onWaiting: () => this.setVideoStatus(options.videoId, VideoStatus.WAITING_FOR_INPUT),
         loadExisting: () => this.visualsService.loadExisting(paths.visualsDir),
-        generate: () => this.visualsService.fetchClips(beats, paths.visualsDir),
+        generate: async () => {
+          if (options.composeImagePaths?.length) {
+            await this.visualsService.seedComposeImages(
+              options.composeImagePaths,
+              paths.visualsDir,
+              beats.length,
+            );
+          }
+          return this.visualsService.fetchClips(beats, paths.visualsDir, {
+            videoId: options.videoId,
+            identityProvider: options.identityProvider,
+          });
+        },
       }),
-      (result) => this.visualsProvider(result),
+      (result) => ({ provider: this.visualsProvider(result), costUsd: this.visualsService.lastCostUsd }),
     );
 
     this.logger.log(`${clips.length} clip(s) listo(s)`);
@@ -225,14 +256,27 @@ export class PipelineService {
         interactiveLabel: 'render (04_render/final.mp4)',
         onWaiting: () => this.setVideoStatus(options.videoId, VideoStatus.WAITING_FOR_INPUT),
         loadExisting: async () => ({ videoPath: paths.render, durationMs: audio.durationMs }),
-        generate: () => this.renderService.render(clips, audio, paths.renderDir),
+        generate: () =>
+          this.renderService.render(clips, audio, paths.renderDir, {
+            backgroundMusicPath: options.backgroundMusicPath,
+            settings: options.render,
+          }),
       }),
-      () => 'ffmpeg',
+      () => ({ provider: 'ffmpeg' }),
     );
 
     this.logger.log(`Video listo en ${render.videoPath}`);
     await this.manifestService.markDone(options.runDir, manifest, 'render', [paths.render]);
     return render;
+  }
+
+  private resolveNarrativeProfile(options: RunOptions, manifest: RunManifest | null): NarrativeProfile {
+    return (
+      options.narrativeProfile ??
+      manifest?.narrativeProfile ??
+      this.scriptService.resolveProfile() ??
+      DEFAULT_NARRATIVE_PROFILE
+    );
   }
 
   private async loadScriptArtifact(scriptPath: string): Promise<GeneratedScript> {
@@ -264,26 +308,29 @@ export class PipelineService {
     videoId: string | undefined,
     stage: PipelineStageName,
     fn: () => Promise<T>,
-    providerOf: (result?: T) => string | undefined,
+    metaOf: (result?: T) => { provider?: string; costUsd?: number },
   ): Promise<T> {
     try {
       const result = await fn();
       if (videoId) {
+        const meta = metaOf(result);
         await this.videoLogs.appendStage({
           videoId,
           stage,
           success: true,
-          provider: providerOf(result),
+          provider: meta.provider,
+          costUsd: meta.costUsd,
         });
       }
       return result;
     } catch (error) {
       if (videoId) {
+        const meta = metaOf();
         await this.videoLogs.appendStage({
           videoId,
           stage,
           success: false,
-          provider: providerOf(),
+          provider: meta.provider,
           errorDetail: error instanceof Error ? error.message : String(error),
         });
       }
@@ -293,6 +340,7 @@ export class PipelineService {
 
   private visualsProvider(clips?: VisualClip[]): string {
     if (!clips || clips.length === 0) return 'pexels';
+    if (clips.some((c) => c.source === 'fal')) return 'fal';
     return clips.some((c) => c.source === 'pexels') ? 'pexels' : 'local';
   }
 }

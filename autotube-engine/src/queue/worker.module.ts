@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 import { PipelineModule } from '../pipeline/pipeline.module';
+import { PublishModule } from '../publish/publish.module';
+import { PublishProcessor } from '../publish/publish.processor';
+import { AnalyticsModule } from '../analytics/analytics.module';
+import { AnalyticsProcessor } from '../analytics/analytics.processor';
 import { ProducerModule } from './producer.module';
 import { PipelineProcessor } from './pipeline.processor';
 
@@ -10,7 +14,7 @@ import { PipelineProcessor } from './pipeline.processor';
  * efectivamente ejecuta el pipeline.
  */
 @Module({
-  imports: [ProducerModule, PipelineModule],
-  providers: [PipelineProcessor],
+  imports: [ProducerModule, PipelineModule, PublishModule, AnalyticsModule],
+  providers: [PipelineProcessor, PublishProcessor, AnalyticsProcessor],
 })
 export class WorkerModule {}

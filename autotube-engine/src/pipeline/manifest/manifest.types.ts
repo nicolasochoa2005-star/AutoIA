@@ -17,6 +17,8 @@ export interface RunManifest {
   runId: string;
   topicHint: string;
   characterId?: string;
+  /** Autopilot (default) o directed. Persistido para --resume. */
+  narrativeProfile?: 'autopilot' | 'directed';
   stages: Record<StageName, StageManifestEntry>;
   createdAt: string;
   updatedAt: string;

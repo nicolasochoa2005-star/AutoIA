@@ -13,6 +13,7 @@ export interface RunManifest {
   runId: string;
   topicHint: string;
   characterId?: string;
+  narrativeProfile?: 'autopilot' | 'directed';
   stages: Record<StageName, StageManifestEntry>;
   createdAt: string;
   updatedAt: string;

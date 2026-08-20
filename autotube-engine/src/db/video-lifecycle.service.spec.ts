@@ -1,7 +1,7 @@
 import { VideoStatus } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 import { VideoLifecycleService } from './video-lifecycle.service';
-import { ReviewConflictError, ReviewValidationError, VideoNotFoundError } from './video-review.errors';
+import { PublishConflictError, ReviewConflictError, ReviewValidationError, VideoNotFoundError } from './video-review.errors';
 
 describe('VideoLifecycleService.review', () => {
   const prisma = {
@@ -118,5 +118,71 @@ describe('VideoLifecycleService.list', () => {
         where: { status: VideoStatus.ERROR },
       }),
     );
+  });
+});
+
+describe('VideoLifecycleService.markPublished', () => {
+  const prisma = {
+    video: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+  };
+  const service = new VideoLifecycleService(prisma as unknown as PrismaService);
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('marks an APPROVED video as PUBLISHED', async () => {
+    prisma.video.findUnique.mockResolvedValue({
+      id: 'v1',
+      status: VideoStatus.APPROVED,
+      youtubeVideoId: null,
+    });
+    prisma.video.update.mockResolvedValue({
+      id: 'v1',
+      status: VideoStatus.PUBLISHED,
+      youtubeVideoId: 'yt1',
+    });
+
+    const result = await service.markPublished('v1', 'yt1');
+    expect(result.status).toBe(VideoStatus.PUBLISHED);
+    expect(prisma.video.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: VideoStatus.PUBLISHED,
+          youtubeVideoId: 'yt1',
+          errorReason: null,
+        }),
+      }),
+    );
+  });
+
+  it('is a no-op when already PUBLISHED', async () => {
+    prisma.video.findUnique
+      .mockResolvedValueOnce({
+        id: 'v1',
+        status: VideoStatus.PUBLISHED,
+        youtubeVideoId: 'yt1',
+      })
+      .mockResolvedValueOnce({
+        id: 'v1',
+        status: VideoStatus.PUBLISHED,
+        youtubeVideoId: 'yt1',
+      });
+
+    const result = await service.markPublished('v1', 'yt-other');
+    expect(result.youtubeVideoId).toBe('yt1');
+    expect(prisma.video.update).not.toHaveBeenCalled();
+  });
+
+  it('throws when status is not APPROVED', async () => {
+    prisma.video.findUnique.mockResolvedValue({
+      id: 'v1',
+      status: VideoStatus.REJECTED,
+      youtubeVideoId: null,
+    });
+    await expect(service.markPublished('v1', 'yt1')).rejects.toBeInstanceOf(PublishConflictError);
   });
 });

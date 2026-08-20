@@ -7,7 +7,8 @@ import { VideoLifecycleService } from '../db/video-lifecycle.service';
 import { DEFAULT_STAGE_MODES } from '../pipeline/manifest/manifest.types';
 import { PipelineService } from '../pipeline/pipeline.service';
 import { classifyErrorReason } from './error-classifier';
-import { VIDEO_GENERATION_QUEUE, VideoGenerationJobData } from './pipeline.queue';
+import { VIDEO_GENERATION_QUEUE, type VideoGenerationJobData } from './pipeline.queue';
+import { WORKER_NARRATIVE_PROFILE } from '../pipeline/script/narrative-profile';
 
 @Processor(VIDEO_GENERATION_QUEUE)
 export class PipelineProcessor extends WorkerHost {
@@ -32,6 +33,7 @@ export class PipelineProcessor extends WorkerHost {
         runDir: workDir,
         modes: DEFAULT_STAGE_MODES,
         videoId,
+        narrativeProfile: WORKER_NARRATIVE_PROFILE,
       });
     } catch (error) {
       const errorReason = classifyErrorReason(error);

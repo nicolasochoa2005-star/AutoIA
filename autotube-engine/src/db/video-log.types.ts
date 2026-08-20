@@ -1,6 +1,6 @@
 export interface StageLogInput {
   videoId: string;
-  stage: 'SCRIPT' | 'TTS' | 'VISUALS' | 'RENDER';
+  stage: 'SCRIPT' | 'TTS' | 'VISUALS' | 'RENDER' | 'PUBLISH';
   success: boolean;
   provider?: string;
   costUsd?: number;

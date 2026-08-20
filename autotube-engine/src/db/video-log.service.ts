@@ -20,4 +20,39 @@ export class VideoLogService {
       },
     });
   }
+
+  async sumCostUsd(params: { since?: Date; videoId?: string } = {}): Promise<number> {
+    const result = await this.prisma.videoLog.aggregate({
+      _sum: { costUsd: true },
+      where: {
+        videoId: params.videoId,
+        createdAt: params.since ? { gte: params.since } : undefined,
+      },
+    });
+    return Number(result._sum.costUsd ?? 0);
+  }
+
+  async spendByProvider(since?: Date): Promise<{ provider: string; costUsd: number }[]> {
+    const rows = await this.prisma.videoLog.groupBy({
+      by: ['provider'],
+      _sum: { costUsd: true },
+      where: {
+        createdAt: since ? { gte: since } : undefined,
+        provider: { not: null },
+      },
+    });
+    return rows.map((row) => ({
+      provider: row.provider ?? 'unknown',
+      costUsd: Number(row._sum.costUsd ?? 0),
+    }));
+  }
+
+  async latestQuotaExceededAt(): Promise<Date | null> {
+    const row = await this.prisma.video.findFirst({
+      where: { errorReason: 'QUOTA_EXCEEDED' },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    return row?.createdAt ?? null;
+  }
 }

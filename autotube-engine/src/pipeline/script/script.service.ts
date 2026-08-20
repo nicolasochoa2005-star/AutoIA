@@ -6,8 +6,14 @@ import { ScriptProvider } from './providers/script-provider.interface';
 import { GeminiProvider } from './providers/gemini.provider';
 import { GroqProvider } from './providers/groq.provider';
 import { CharacterBible } from '../library/library.types';
+import { applyNarrativeContract } from './script-narrative.validator';
+import {
+  DEFAULT_NARRATIVE_PROFILE,
+  parseNarrativeProfile,
+  type NarrativeProfile,
+} from './narrative-profile';
 
-const SYSTEM_PROMPT = `Sos un guionista de YouTube Shorts. Generá una pieza de contenido corta (25-40s de locución) en formato JSON estricto, sin texto adicional fuera del JSON, con esta forma exacta:
+const AUTOPILOT_PROMPT = `Sos un guionista de YouTube Shorts. Generá una pieza de contenido corta (25-40s de locución) en formato JSON estricto, sin texto adicional fuera del JSON, con esta forma exacta:
 {
   "titulo": string,
   "descripcion": string (incluir 2-3 hashtags relevantes),
@@ -16,11 +22,28 @@ const SYSTEM_PROMPT = `Sos un guionista de YouTube Shorts. Generá una pieza de 
   "prompts_visuales": string[] (3-5 prompts en inglés para buscar stock footage)
 }`;
 
+const DIRECTED_PROMPT = `Sos un guionista de YouTube Shorts. Generá una pieza de máximo 30 segundos de locución (~65-75 palabras) en JSON estricto, sin texto fuera del JSON, con esta forma exacta:
+{
+  "titulo": string,
+  "descripcion": string (incluir 2-3 hashtags relevantes),
+  "etiquetas": string[] (5-8 etiquetas),
+  "hook": string (apertura inmediata: pregunta, dato o tensión),
+  "desarrollo": string (contexto, personaje y conflicto, sin relleno),
+  "climax": string (giro o revelación),
+  "cta": string (llamado a la acción breve),
+  "guion_locucion": string (concatenación de hook, desarrollo, climax y cta),
+  "prompts_visuales": string[] (3-5 prompts en inglés para stock)
+}
+No superes 75 palabras en la locución total. El CTA entra en los 30 segundos.`;
+
 const CHARACTER_SCHEMA_ADDENDUM = `Si se te provee un personaje (identidad fija), agregá también "beats_visuales": array de objetos { "prompt": string, "subject_id": string, "outfit_id": string, "source_hint": "character" } — uno por plano donde aparece el personaje. No cambies de sujeto entre beats: todos deben usar el mismo subject_id salvo indicación contraria.`;
 
-function buildCharacterBlock(character: CharacterBible): string {
+const DIRECTED_CHARACTER_ADDENDUM = `En cada beat incluí "duration_s" (segundos, número) y "action" (qué se ve). La suma de duration_s no puede superar 30. Opcional: camera, continuity, environment.`;
+
+function buildCharacterBlock(character: CharacterBible, profile: NarrativeProfile): string {
   const outfits = character.outfits.map((o) => `${o.id} (${o.description})`).join(', ') || 'ninguno definido';
-  return `Personaje fijado para esta corrida — subject_id "${character.subjectId}": ${character.name}. ${character.description}\nOutfits disponibles: ${outfits}.\nNO cambies la identidad del sujeto entre beats. ${CHARACTER_SCHEMA_ADDENDUM}`;
+  const extra = profile === 'directed' ? ` ${DIRECTED_CHARACTER_ADDENDUM}` : '';
+  return `Personaje fijado para esta corrida — subject_id "${character.subjectId}": ${character.name}. ${character.description}\nOutfits disponibles: ${outfits}.\nNO cambies la identidad del sujeto entre beats. ${CHARACTER_SCHEMA_ADDENDUM}${extra}`;
 }
 
 @Injectable()
@@ -41,19 +64,26 @@ export class ScriptService {
     }
   }
 
+  resolveProfile(override?: NarrativeProfile): NarrativeProfile {
+    if (override) return override;
+    return parseNarrativeProfile(this.config.get<string>('NARRATIVE_PROFILE', DEFAULT_NARRATIVE_PROFILE));
+  }
+
   async generate(
     topicHint: string,
     recentTitles: string[],
     extraInstruction?: string,
     character?: CharacterBible,
+    profile: NarrativeProfile = DEFAULT_NARRATIVE_PROFILE,
   ): Promise<GeneratedScript> {
     const historyBlock = recentTitles.length
       ? `Temas ya publicados recientemente (NO repetir tema ni estructura de apertura): ${recentTitles.join(', ')}`
       : 'No hay videos previos publicados todavía.';
 
     const extraBlock = extraInstruction ? `\n${extraInstruction}` : '';
-    const characterBlock = character ? `\n${buildCharacterBlock(character)}` : '';
-    const prompt = `${SYSTEM_PROMPT}\n\nTema sugerido: ${topicHint}\n${historyBlock}${extraBlock}${characterBlock}`;
+    const characterBlock = character ? `\n${buildCharacterBlock(character, profile)}` : '';
+    const system = profile === 'directed' ? DIRECTED_PROMPT : AUTOPILOT_PROMPT;
+    const prompt = `${system}\n\nTema sugerido: ${topicHint}\n${historyBlock}${extraBlock}${characterBlock}`;
 
     let lastError: unknown;
     for (const [index, provider] of this.providers.entries()) {
@@ -64,7 +94,7 @@ export class ScriptService {
           isRetryable: (err) => provider.isTransientError(err),
         });
         this.lastSuccessfulProvider = provider.name;
-        return this.parseAndValidate(raw);
+        return this.parseAndValidate(raw, profile);
       } catch (err) {
         lastError = err;
         const hasNextProvider = index < this.providers.length - 1;
@@ -81,7 +111,7 @@ export class ScriptService {
       : new Error('INVALID_SCRIPT: todos los proveedores de guion fallaron');
   }
 
-  private parseAndValidate(raw: string): GeneratedScript {
+  parseAndValidate(raw: string, profile: NarrativeProfile = DEFAULT_NARRATIVE_PROFILE): GeneratedScript {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -93,22 +123,37 @@ export class ScriptService {
       throw new Error('INVALID_SCRIPT: la respuesta no cumple el schema esperado');
     }
 
-    return parsed;
+    return applyNarrativeContract(
+      {
+        ...parsed,
+        guion_locucion: parsed.guion_locucion ?? '',
+      },
+      profile,
+    );
   }
 
   private isGeneratedScript(value: unknown): value is GeneratedScript {
     if (typeof value !== 'object' || value === null) return false;
     const v = value as Record<string, unknown>;
+    const locution = typeof v.guion_locucion === 'string' ? v.guion_locucion.trim() : '';
+    const directedBlocks =
+      typeof v.hook === 'string' &&
+      v.hook.trim().length > 0 &&
+      typeof v.desarrollo === 'string' &&
+      v.desarrollo.trim().length > 0 &&
+      typeof v.climax === 'string' &&
+      v.climax.trim().length > 0 &&
+      typeof v.cta === 'string' &&
+      v.cta.trim().length > 0;
     return (
       typeof v.titulo === 'string' &&
       typeof v.descripcion === 'string' &&
       Array.isArray(v.etiquetas) &&
       v.etiquetas.every((t) => typeof t === 'string') &&
-      typeof v.guion_locucion === 'string' &&
-      v.guion_locucion.trim().length > 0 &&
       Array.isArray(v.prompts_visuales) &&
       v.prompts_visuales.every((p) => typeof p === 'string') &&
-      v.prompts_visuales.length > 0
+      v.prompts_visuales.length > 0 &&
+      (locution.length > 0 || directedBlocks)
     );
   }
 }

@@ -7,6 +7,8 @@ import { GeneratedScript } from '../types/script.types';
 import { HISTORY_STORE } from './history-store.token';
 import type { ScriptHistoryStore } from './history-store.token';
 import type { CharacterBible } from '../library/library.types';
+import type { NarrativeProfile } from '../script/narrative-profile';
+import { DEFAULT_NARRATIVE_PROFILE } from '../script/narrative-profile';
 
 const DEFAULT_MAX_REGENERATIONS = 3;
 const DEFAULT_SIMILARITY_THRESHOLD = 0.85;
@@ -44,6 +46,7 @@ export class AntiRepetitionService {
   async generateNonRepetitive(
     topicHint: string,
     character?: CharacterBible,
+    profile: NarrativeProfile = DEFAULT_NARRATIVE_PROFILE,
   ): Promise<AntiRepetitionResult> {
     const maxAttempts = this.config.get<number>(
       'ANTI_REPETITION_MAX_ATTEMPTS',
@@ -65,12 +68,29 @@ export class AntiRepetitionService {
     let extraInstruction: string | undefined;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const script = await this.scriptService.generate(
-        topicHint,
-        recentTitles,
-        extraInstruction,
-        character,
-      );
+      let script: GeneratedScript;
+      try {
+        script = await this.scriptService.generate(
+          topicHint,
+          recentTitles,
+          extraInstruction,
+          character,
+          profile,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.startsWith('INVALID_SCRIPT:') && attempt < maxAttempts) {
+          this.logger.warn(`Intento ${attempt}/${maxAttempts}: ${message}`);
+          extraInstruction = [
+            extraInstruction,
+            'El JSON anterior no cumplió el contrato narrativo. Completá hook, desarrollo, climax y cta, acortá a 75 palabras y duration_s que sumen 30 o menos.',
+          ]
+            .filter(Boolean)
+            .join(' ');
+          continue;
+        }
+        throw error;
+      }
       const embedding = await this.embeddingService.embed(script.guion_locucion);
 
       const maxSimilarity = this.maxSimilarityAgainst(embedding, history);

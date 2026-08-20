@@ -19,13 +19,13 @@ export class PostgresScriptHistoryStore implements ScriptHistoryStore {
   ) {}
 
   async getRecent(limit: number): Promise<ScriptHistoryEntry[]> {
+    const safeLimit = Math.max(1, Math.floor(Number(limit)) || 20);
     const rows = await this.prisma.$queryRawUnsafe<HistoryRow[]>(
       `SELECT id, title, embedding::text AS embedding, hook_type, created_at
        FROM videos
        WHERE embedding IS NOT NULL
        ORDER BY created_at DESC
-       LIMIT $1`,
-      limit,
+       LIMIT ${safeLimit}`,
     );
 
     const entries: ScriptHistoryEntry[] = [];

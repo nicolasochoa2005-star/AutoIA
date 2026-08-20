@@ -3,10 +3,14 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { isRunning, startRun, confirmWaiting } from '@/lib/process-manager';
 import { readManifest } from '@/lib/manifest';
+import { parseStartOptions, loadWorkflowAssets } from '@/lib/start-options';
 
 /** "Play del grafo": si hay un proceso activo en pausa, lo confirma (ENTER); si no, arranca/continúa. */
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ runId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
+  const body = await req.json().catch(() => ({}));
+  const opts = parseStartOptions(body);
+  const assets = await loadWorkflowAssets(runId);
 
   if (isRunning(runId)) {
     const ok = confirmWaiting(runId);
@@ -21,6 +25,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ ru
     );
   }
 
-  startRun(runId, manifest.topicHint, { characterId: manifest.characterId });
+  startRun(runId, manifest.topicHint, {
+    ...opts,
+    characterId: opts.characterId ?? manifest.characterId,
+    composeImagePaths: opts.composeImagePaths?.length ? opts.composeImagePaths : assets.composeImagePaths,
+    backgroundMusicPath: opts.backgroundMusicPath ?? assets.backgroundMusicPath,
+  });
   return NextResponse.json({ action: 'started' });
 }

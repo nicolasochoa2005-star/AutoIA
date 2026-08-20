@@ -4,13 +4,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isRunning, startRun } from '@/lib/process-manager';
 import { readManifest } from '@/lib/manifest';
 import { STAGE_ORDER, StageName } from '@/lib/engine-paths';
+import { parseStartOptions, loadWorkflowAssets } from '@/lib/start-options';
 
 /** "Play de un nodo suelto": regenera esa etapa (y las siguientes) desde cero. */
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ runId: string; stage: string }> },
 ) {
   const { runId, stage } = await params;
+  const body = await req.json().catch(() => ({}));
+  const opts = parseStartOptions(body);
+  const assets = await loadWorkflowAssets(runId);
 
   if (!STAGE_ORDER.includes(stage as StageName)) {
     return NextResponse.json({ error: `etapa inválida: ${stage}` }, { status: 400 });
@@ -28,8 +32,11 @@ export async function POST(
   }
 
   startRun(runId, manifest.topicHint, {
-    characterId: manifest.characterId,
+    ...opts,
+    characterId: opts.characterId ?? manifest.characterId,
     from: stage as StageName,
+    composeImagePaths: opts.composeImagePaths?.length ? opts.composeImagePaths : assets.composeImagePaths,
+    backgroundMusicPath: opts.backgroundMusicPath ?? assets.backgroundMusicPath,
   });
   return NextResponse.json({ action: 'regenerating', stage });
 }

@@ -10,10 +10,12 @@ Cada fila pendiente es un change en `openspec/changes/`. Un change = un rol due�
 | Hecho (specs vigentes) | `add-postgres-video-lifecycle` | Engine | Estados persistentes, embeddings, logs con costo |
 | Hecho (specs vigentes) | `add-node-studio` | Studio | Canvas de nodos (React Flow) sobre el contrato de artefactos |
 | Hecho (specs vigentes) | `add-dashboard-qa` | Dashboard | Cola, preview, aprobar/rechazar, `WAITING_FOR_INPUT` |
-| Activo | `add-youtube-publish` | Engine | Upload OAuth tras QA. Desbloqueado por `add-dashboard-qa` |
-| Activo | `add-analytics-and-paid-providers` | Dashboard + Engine | KPIs YouTube + adapters pagos opt-in. Bloqueado por publish |
+| Hecho (specs vigentes) | `add-youtube-publish` | Engine | Upload OAuth tras QA (`UNLISTED`) |
+| Hecho (specs vigentes) | `add-analytics-and-paid-providers` | Dashboard + Engine | KPIs YouTube + adapters pagos opt-in (default $0) |
+| Activo | `add-short-narrative-contract` | Engine | Perfil autopilot (default) vs directed (30 s / hook-CTA). Default $0 |
+| Activo | `add-comfy-style-studio-nodes` | Studio | Nodos granulares tipo ComfyUI (sockets tipados, paleta, workflow.json) |
 
-Orden sugerido: **publish → analytics/pagos**.
+Orden sugerido: **contrato narrativo del Short**. Follow-ups (no activos): Character Reference still maestro; video GenAI opt-in por beat.
 
 Cómo trabajar:
 

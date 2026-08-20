@@ -11,6 +11,7 @@ export type VideoStatus =
   | 'READY_FOR_REVIEW'
   | 'APPROVED'
   | 'REJECTED'
+  | 'PUBLISHED'
   | 'ERROR';
 
 export type VideoListItem = {
@@ -70,4 +71,43 @@ export async function reviewVideo(
 
 export function previewUrl(id: string): string {
   return `${ENGINE_URL}/videos/${id}/preview`;
+}
+
+export type MetricsSummary = {
+  days: number;
+  views: number;
+  retention: number;
+  estimatedRevenue: number;
+  videos: number;
+  snapshots: { fetchedAt: string; views: number; retentionRate: number; estimatedRevenue: number }[];
+};
+
+export type MetricsSpend = {
+  today: { provider: string; costUsd: number }[];
+  all: { provider: string; costUsd: number }[];
+};
+
+export type MetricsHealth = {
+  youtubeQuota: 'ok' | 'exceeded';
+  lastExceededAt: string | null;
+};
+
+async function fetchJson<T>(path: string): Promise<T> {
+  const res = await fetch(`${ENGINE_URL}${path}`, { cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error(`No se pudo cargar ${path} (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export function fetchMetricsSummary(days: 7 | 30 | 90): Promise<MetricsSummary> {
+  return fetchJson<MetricsSummary>(`/metrics/summary?days=${days}`);
+}
+
+export function fetchMetricsSpend(): Promise<MetricsSpend> {
+  return fetchJson<MetricsSpend>('/metrics/spend');
+}
+
+export function fetchMetricsHealth(): Promise<MetricsHealth> {
+  return fetchJson<MetricsHealth>('/metrics/health');
 }

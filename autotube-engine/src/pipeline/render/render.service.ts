@@ -3,10 +3,12 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { spawn } from 'child_process';
 import { RenderedVideo, SynthesizedAudio, VisualClip } from '../types/script.types';
+import {
+  resolveRenderSettings,
+  rewriteAssPlayRes,
+  type RenderSettings,
+} from './render-settings';
 
-const TARGET_WIDTH = 1080;
-const TARGET_HEIGHT = 1920;
-const TARGET_FPS = 60;
 const KEN_BURNS_MIN_DURATION_SEC = 2;
 
 @Injectable()
@@ -17,15 +19,26 @@ export class RenderService {
     clips: VisualClip[],
     audio: SynthesizedAudio,
     outputDir: string,
-    backgroundMusicPath?: string,
+    options: { backgroundMusicPath?: string; settings?: Partial<RenderSettings> } = {},
   ): Promise<RenderedVideo> {
+    const settings = resolveRenderSettings(options.settings);
+    const backgroundMusicPath = options.backgroundMusicPath;
     await fs.mkdir(outputDir, { recursive: true });
 
     const concatListPath = path.join(outputDir, 'concat_list.txt');
     const normalizedClipsDir = path.join(outputDir, 'normalized_clips');
     await fs.mkdir(normalizedClipsDir, { recursive: true });
 
-    const normalizedPaths = await this.normalizeClips(clips, normalizedClipsDir, audio.durationMs);
+    const targetDurationSec = settings.durationSec
+      ? Math.min(settings.durationSec, audio.durationMs / 1000)
+      : audio.durationMs / 1000;
+
+    const normalizedPaths = await this.normalizeClips(
+      clips,
+      normalizedClipsDir,
+      targetDurationSec * 1000,
+      settings,
+    );
     await this.writeConcatList(normalizedPaths, concatListPath);
 
     const concatenatedPath = path.join(outputDir, 'background_concat.mp4');
@@ -35,15 +48,16 @@ export class RenderService {
       '-safe', '0',
       '-i', concatListPath,
       '-an',
-      '-t', String(audio.durationMs / 1000),
+      '-t', String(targetDurationSec),
       concatenatedPath,
     ]);
 
     const outputPath = path.join(outputDir, 'final.mp4');
-    const escapedAssPath = this.escapeFfmpegFilterPath(audio.subtitlesAssPath);
+    const scaledAssPath = await this.writeScaledAss(audio.subtitlesAssPath, outputDir, settings);
+    const escapedAssPath = this.escapeFfmpegFilterPath(scaledAssPath);
 
     try {
-      await this.runComposite(concatenatedPath, audio, escapedAssPath, outputPath, backgroundMusicPath);
+      await this.runComposite(concatenatedPath, audio, escapedAssPath, outputPath, backgroundMusicPath, settings);
     } catch (err) {
       if (!backgroundMusicPath) {
         throw err;
@@ -51,7 +65,7 @@ export class RenderService {
       this.logger.warn(
         `Fallo el render con música de fondo, reintentando sin BGM: ${(err as Error).message}`,
       );
-      await this.runComposite(concatenatedPath, audio, escapedAssPath, outputPath, undefined);
+      await this.runComposite(concatenatedPath, audio, escapedAssPath, outputPath, undefined, settings);
     }
 
     const stat = await fs.stat(outputPath).catch(() => null);
@@ -59,7 +73,15 @@ export class RenderService {
       throw new Error('RENDER_FAILED: el archivo de salida no se generó o está vacío');
     }
 
-    return { videoPath: outputPath, durationMs: audio.durationMs };
+    return { videoPath: outputPath, durationMs: Math.round(targetDurationSec * 1000) };
+  }
+
+  private async writeScaledAss(assPath: string, outputDir: string, settings: RenderSettings): Promise<string> {
+    const raw = await fs.readFile(assPath, 'utf-8');
+    const scaled = rewriteAssPlayRes(raw, settings.width, settings.height);
+    const outPath = path.join(outputDir, 'subtitles_scaled.ass');
+    await fs.writeFile(outPath, scaled, 'utf-8');
+    return outPath;
   }
 
   private async runComposite(
@@ -68,6 +90,7 @@ export class RenderService {
     escapedAssPath: string,
     outputPath: string,
     backgroundMusicPath: string | undefined,
+    settings: RenderSettings,
   ): Promise<void> {
     const audioFilterArgs = backgroundMusicPath
       ? this.buildDuckingFilter()
@@ -80,11 +103,11 @@ export class RenderService {
     await this.runFfmpeg([
       '-y',
       ...inputs,
-      '-vf', `scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=increase,crop=${TARGET_WIDTH}:${TARGET_HEIGHT},fps=${TARGET_FPS},ass=${escapedAssPath}`,
+      '-vf', `scale=${settings.width}:${settings.height}:force_original_aspect_ratio=increase,crop=${settings.width}:${settings.height},fps=${settings.fps},ass=${escapedAssPath}`,
       ...audioFilterArgs,
       '-map', '0:v',
-      '-c:v', 'libx264',
-      '-c:a', 'aac',
+      '-c:v', settings.vcodec,
+      '-c:a', settings.acodec,
       '-shortest',
       outputPath,
     ]);
@@ -102,7 +125,6 @@ export class RenderService {
   }
 
   private buildDuckingFilter(): string[] {
-    // Atenúa la música de fondo (input 2) mientras hay locución (input 1) usando sidechaincompress.
     return [
       '-filter_complex',
       '[2:a]volume=0.25[music];[1:a][music]sidechaincompress=threshold=0.05:ratio=8[ducked];[1:a][ducked]amix=inputs=2:duration=first[aout]',
@@ -114,10 +136,8 @@ export class RenderService {
     clips: VisualClip[],
     outDir: string,
     audioDurationMs: number,
+    settings: RenderSettings,
   ): Promise<string[]> {
-    // Los stills (Ken Burns) no tienen duración natural como un clip de stock;
-    // se reparte la duración del audio entre ellos para que la concatenación
-    // alcance a cubrir la locución completa (si no, `-shortest` recorta el audio).
     const stillCount = clips.filter((c) => c.kind === 'still').length;
     const kenBurnsDurationSec =
       stillCount > 0
@@ -128,14 +148,14 @@ export class RenderService {
     for (const [index, clip] of clips.entries()) {
       const outPath = path.join(outDir, `n_${index}.mp4`);
       if (clip.kind === 'still') {
-        await this.kenBurnsClip(clip.localPath, outPath, kenBurnsDurationSec);
+        await this.kenBurnsClip(clip.localPath, outPath, kenBurnsDurationSec, settings);
       } else {
         await this.runFfmpeg([
           '-y',
           '-i', clip.localPath,
-          '-vf', `scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=increase,crop=${TARGET_WIDTH}:${TARGET_HEIGHT},fps=${TARGET_FPS}`,
+          '-vf', `scale=${settings.width}:${settings.height}:force_original_aspect_ratio=increase,crop=${settings.width}:${settings.height},fps=${settings.fps}`,
           '-an',
-          '-c:v', 'libx264',
+          '-c:v', settings.vcodec === 'libx265' ? 'libx264' : settings.vcodec,
           outPath,
         ]);
       }
@@ -144,11 +164,15 @@ export class RenderService {
     return normalized;
   }
 
-  /** Convierte un still en un clip 9:16 con zoom/pan lento (sección 3.4). */
-  private async kenBurnsClip(stillPath: string, outPath: string, durationSec: number): Promise<void> {
-    const oversizeWidth = TARGET_WIDTH * 2;
-    const oversizeHeight = TARGET_HEIGHT * 2;
-    const totalFrames = Math.round(durationSec * TARGET_FPS);
+  private async kenBurnsClip(
+    stillPath: string,
+    outPath: string,
+    durationSec: number,
+    settings: RenderSettings,
+  ): Promise<void> {
+    const oversizeWidth = settings.width * 2;
+    const oversizeHeight = settings.height * 2;
+    const totalFrames = Math.round(durationSec * settings.fps);
 
     await this.runFfmpeg([
       '-y',
@@ -156,7 +180,7 @@ export class RenderService {
       '-i', stillPath,
       '-t', String(durationSec),
       '-vf',
-      `scale=${oversizeWidth}:${oversizeHeight}:force_original_aspect_ratio=increase,crop=${oversizeWidth}:${oversizeHeight},zoompan=z='min(zoom+0.0015,1.2)':d=${totalFrames}:s=${TARGET_WIDTH}x${TARGET_HEIGHT}:fps=${TARGET_FPS}`,
+      `scale=${oversizeWidth}:${oversizeHeight}:force_original_aspect_ratio=increase,crop=${oversizeWidth}:${oversizeHeight},zoompan=z='min(zoom+0.0015,1.2)':d=${totalFrames}:s=${settings.width}x${settings.height}:fps=${settings.fps}`,
       '-pix_fmt', 'yuv420p',
       '-c:v', 'libx264',
       outPath,

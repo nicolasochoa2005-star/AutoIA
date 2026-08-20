@@ -19,6 +19,7 @@ const FILTERS: { id: string; label: string }[] = [
   { id: 'ERROR', label: 'Error' },
   { id: 'REJECTED', label: 'Rechazados' },
   { id: 'APPROVED', label: 'Aprobados' },
+  { id: 'PUBLISHED', label: 'Publicados' },
 ];
 
 function formatDate(value: string | null): string {
@@ -97,6 +98,8 @@ export function DashboardClient() {
         <h1>Dashboard QA</h1>
         <p>
           Cola lineal de Shorts. Engine: <code>{ENGINE_URL}</code>
+          {' · '}
+          <a href="/dashboard/kpis">KPIs</a>
         </p>
       </header>
 

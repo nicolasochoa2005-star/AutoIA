@@ -9,7 +9,7 @@ async function bootstrap() {
     logger: ['log', 'warn', 'error'],
   });
 
-  logger.log('Worker iniciado. Escuchando jobs en la cola "video-generation"...');
+  logger.log('Worker iniciado. Escuchando video-generation, video-publish y video-analytics...');
 
   const shutdown = async () => {
     logger.log('Cerrando worker...');

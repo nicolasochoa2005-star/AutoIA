@@ -2,7 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { VideoStatus } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 import { GeneratedScript, VisualClip } from '../pipeline/types/script.types';
-import { ReviewConflictError, ReviewValidationError, VideoNotFoundError } from './video-review.errors';
+import {
+  PublishConflictError,
+  ReviewConflictError,
+  ReviewValidationError,
+  VideoNotFoundError,
+} from './video-review.errors';
 
 const VIDEO_LIST_SELECT = {
   id: true,
@@ -29,6 +34,8 @@ const VIDEO_DETAIL_SELECT = {
   reviewNotes: true,
   characterId: true,
   hookType: true,
+  youtubeVideoId: true,
+  publishedAt: true,
 } as const;
 
 export type VideoListItem = {
@@ -50,6 +57,8 @@ export type VideoDetail = VideoListItem & {
   reviewNotes: string | null;
   characterId: string | null;
   hookType: string | null;
+  youtubeVideoId: string | null;
+  publishedAt: Date | null;
 };
 
 export type ReviewAction = 'approve' | 'reject';
@@ -144,6 +153,37 @@ export class VideoLifecycleService {
         reviewedAt: new Date(),
         reviewedBy: input.reviewedBy.trim().slice(0, 100) || 'operator',
         reviewNotes: input.notes?.trim() || null,
+      },
+      select: VIDEO_DETAIL_SELECT,
+    });
+  }
+
+  async markPublished(id: string, youtubeVideoId: string): Promise<VideoDetail> {
+    const current = await this.prisma.video.findUnique({
+      where: { id },
+      select: { id: true, status: true, youtubeVideoId: true },
+    });
+    if (!current) {
+      throw new VideoNotFoundError(id);
+    }
+    if (current.status === VideoStatus.PUBLISHED && current.youtubeVideoId) {
+      const existing = await this.findById(id);
+      if (!existing) {
+        throw new VideoNotFoundError(id);
+      }
+      return existing;
+    }
+    if (current.status !== VideoStatus.APPROVED) {
+      throw new PublishConflictError(`Video is ${current.status}, expected APPROVED`);
+    }
+
+    return this.prisma.video.update({
+      where: { id },
+      data: {
+        status: VideoStatus.PUBLISHED,
+        youtubeVideoId: youtubeVideoId.trim().slice(0, 50),
+        publishedAt: new Date(),
+        errorReason: null,
       },
       select: VIDEO_DETAIL_SELECT,
     });

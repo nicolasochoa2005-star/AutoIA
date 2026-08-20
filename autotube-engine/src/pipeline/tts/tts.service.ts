@@ -1,57 +1,97 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as path from 'path';
-import * as fs from 'fs/promises';
 import { spawn } from 'child_process';
-import { EdgeTTS } from 'edge-tts-universal';
-import { SynthesizedAudio, WordTimestamp } from '../types/script.types';
-import { buildAssSubtitles } from './ass-builder';
+import { SynthesizedAudio } from '../types/script.types';
+import { CostCapService } from '../../cost/cost-cap.service';
+import { estimateElevenLabsUsd } from '../../cost/cost-rates';
+import { EdgeTtsProvider } from './providers/edge-tts.provider';
+import { ElevenLabsTtsProvider } from './providers/elevenlabs-tts.provider';
+import type { TtsProvider } from './providers/tts-provider.interface';
+
+export type TtsProviderName = 'edge-tts' | 'elevenlabs';
 
 @Injectable()
 export class TtsService {
   private readonly logger = new Logger(TtsService.name);
+  lastProvider = 'edge-tts';
+  lastCostUsd = 0;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly edge: EdgeTtsProvider,
+    private readonly elevenlabs: ElevenLabsTtsProvider,
+    private readonly caps: CostCapService,
+  ) {}
 
-  async synthesize(text: string, outputDir: string): Promise<SynthesizedAudio> {
-    await fs.mkdir(outputDir, { recursive: true });
+  async synthesize(
+    text: string,
+    outputDir: string,
+    options: { videoId?: string; provider?: TtsProviderName } = {},
+  ): Promise<SynthesizedAudio> {
+    const requested = this.resolveProvider(options.provider);
+    const paid = requested === 'elevenlabs';
+    const estimate = paid ? estimateElevenLabsUsd(text) : 0;
 
-    const voice = this.config.get<string>('EDGE_TTS_VOICE', 'es-ES-AlvaroNeural');
-    const audioPath = path.join(outputDir, 'voice.mp3');
-    const subtitlesAssPath = path.join(outputDir, 'subtitles.ass');
-
-    const tts = new EdgeTTS(text, voice);
-    const { audio, subtitle } = await tts.synthesize();
-
-    const words: WordTimestamp[] = subtitle
-      .filter((w) => w.text.trim().length > 0)
-      .map((w) => ({
-        word: w.text,
-        startMs: Math.round(w.offset / 10000),
-        endMs: Math.round((w.offset + w.duration) / 10000),
-      }));
-
-    if (words.length === 0) {
-      throw new Error('TTS_TIMEOUT: no se obtuvieron marcas de tiempo por palabra');
+    if (paid) {
+      const allowed = await this.caps.canAfford(estimate, options.videoId);
+      if (!allowed) {
+        if (this.caps.onCap() === 'waiting') {
+          throw this.caps.capExceededError();
+        }
+        this.logger.warn('Tope de costo: TTS cae a Edge-TTS ($0)');
+        return this.run(this.edge, text, outputDir, 0);
+      }
     }
 
-    const audioBuffer = Buffer.from(await audio.arrayBuffer());
-    await fs.writeFile(audioPath, audioBuffer);
-
-    const assContent = buildAssSubtitles(words);
-    await fs.writeFile(subtitlesAssPath, assContent, 'utf-8');
-
-    const durationMs = words[words.length - 1]?.endMs ?? 0;
-
-    return { audioPath, subtitlesAssPath, words, durationMs };
+    try {
+      return await this.run(this.providerByName(requested), text, outputDir, estimate);
+    } catch (error) {
+      if (paid && this.isFallbackable(error)) {
+        this.logger.warn(`ElevenLabs falló (${(error as Error).message}); fallback Edge-TTS`);
+        return this.run(this.edge, text, outputDir, 0);
+      }
+      throw error;
+    }
   }
 
-  /** Reanuda una etapa TTS ya completada (manifest `done` o gate `pause`/`override`). */
   async loadExisting(audioDir: string): Promise<SynthesizedAudio> {
     const audioPath = path.join(audioDir, 'voice.mp3');
     const subtitlesAssPath = path.join(audioDir, 'subtitles.ass');
     const durationMs = await this.probeDurationMs(audioPath);
+    this.lastProvider = 'edge-tts';
+    this.lastCostUsd = 0;
     return { audioPath, subtitlesAssPath, words: [], durationMs };
+  }
+
+  private async run(
+    provider: TtsProvider,
+    text: string,
+    outputDir: string,
+    costUsd: number,
+  ): Promise<SynthesizedAudio> {
+    const audio = await provider.synthesize(text, outputDir);
+    this.lastProvider = provider.name;
+    this.lastCostUsd = provider.name === 'elevenlabs' ? costUsd : 0;
+    return audio;
+  }
+
+  private resolveProvider(override?: TtsProviderName): TtsProviderName {
+    const raw = (override || this.config.get<string>('TTS_PROVIDER', 'edge-tts') || 'edge-tts').toLowerCase();
+    return raw === 'elevenlabs' ? 'elevenlabs' : 'edge-tts';
+  }
+
+  private providerByName(name: TtsProviderName): TtsProvider {
+    return name === 'elevenlabs' ? this.elevenlabs : this.edge;
+  }
+
+  private isFallbackable(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith('TTS_NO_TIMESTAMPS:')) {
+      return false;
+    }
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    return status === 429 || status === 402 || /insufficient|quota|rate limit/i.test(message);
   }
 
   private probeDurationMs(audioPath: string): Promise<number> {

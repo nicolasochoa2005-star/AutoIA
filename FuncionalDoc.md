@@ -55,9 +55,9 @@ Son dos superficies distintas; no se fusionan en una sola pantalla.
 
 Decisiones de producto del Estudio:
 
-- **No es un n8n/ComfyUI genérico.** Los tipos de nodo están cerrados al dominio (Guion, TTS, Character, Refs, Pexels, Compose, Ken Burns, Render, más adelante Publish). ComfyUI puede existir después como *un* proveedor del nodo Compose si hay GPU local, no como la UI del programa.
-- **Plantilla + corrida:** se edita una plantilla reutilizable (ej. “personaje Ana + fondos Pexels + TTS Álvaro”) y se instancia por tema. Un grafo libre sin validación de cables es fácil de romper (TTS sin guion, render sin audio).
-- **Grafo casi fijo con interruptores:** se pueden encender/apagar ramas (Pexels vs refs, auto vs manual, $0 vs pago). Rearmar el pipeline desde cero cada video no es el flujo principal.
+- **No es un n8n/ComfyUI genérico.** Los tipos de nodo están cerrados a un registry de dominio (LoadImage, Prompt, Compose, Script, TTS, LoadAudio, SaveVideo, y oleadas posteriores). Cada nodo expone sockets tipados; un cable inválido se rechaza. ComfyUI puede existir después como *un* proveedor del nodo Compose/VideoGen si hay GPU local, no como la UI del programa.
+- **Plantilla + corrida:** se edita una plantilla reutilizable (grafo cableable) y se instancia por tema. El grafo se serializa a `workflow.json` y se compila a las opciones del Engine.
+- **Grafo editable con validación:** se pueden agregar nodos del registry y recablear; no se aceptan tipos de terceros. Rearmar el pipeline desde cero no es el flujo principal (hay plantilla Short por defecto).
 - **Play dual:** Play del grafo (corre hasta el primer nodo en `waiting`) y Play de un nodo suelto (regenerar solo el guion o un beat).
 - **Desktop-first:** el canvas es de mouse. El QA en celular, si existe, usa la vista lineal del Dashboard.
 

@@ -5,6 +5,10 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { DbModule } from '../db/db.module';
 import { PipelineProducerService } from './pipeline-producer.service';
 import { VIDEO_GENERATION_QUEUE } from './pipeline.queue';
+import { PublishProducerService } from '../publish/publish-producer.service';
+import { VIDEO_PUBLISH_QUEUE } from '../publish/publish.queue';
+import { AnalyticsProducerService } from '../analytics/analytics-producer.service';
+import { VIDEO_ANALYTICS_QUEUE } from '../analytics/analytics.queue';
 
 /**
  * Módulo liviano para procesos que solo encolan jobs (CLI de enqueue, cron
@@ -26,8 +30,10 @@ import { VIDEO_GENERATION_QUEUE } from './pipeline.queue';
       }),
     }),
     BullModule.registerQueue({ name: VIDEO_GENERATION_QUEUE }),
+    BullModule.registerQueue({ name: VIDEO_PUBLISH_QUEUE }),
+    BullModule.registerQueue({ name: VIDEO_ANALYTICS_QUEUE }),
   ],
-  providers: [PipelineProducerService],
-  exports: [PipelineProducerService],
+  providers: [PipelineProducerService, PublishProducerService, AnalyticsProducerService],
+  exports: [PipelineProducerService, PublishProducerService, AnalyticsProducerService],
 })
 export class ProducerModule {}
